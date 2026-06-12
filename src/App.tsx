@@ -61,7 +61,7 @@ const modules: ModuleSpec[] = [
   { view: "specialties", label: "Especialidades", icon: BadgeCheck, access: ["patient", "doctor", "hospital", "admin"], summary: "Conheça áreas clínicas e escolha a mais adequada." },
   { view: "records", label: "Prontuario", icon: FileText, access: ["doctor", "patient", "admin"], summary: "Notas clínicas, diagnósticos, prescrições e anexos." },
   { view: "notifications", label: "Notificacoes", icon: Bell, access: ["patient", "doctor", "hospital", "admin"], summary: "Lembretes, avisos e preferências de contacto." },
-  { view: "wallet", label: "Carteira", icon: WalletCards, access: ["doctor", "admin"], summary: "Saldo do médico, carregamentos e movimentos." },
+  { view: "wallet", label: "Carteira", icon: WalletCards, access: ["doctor", "hospital"], summary: "Saldo, carregamentos e movimentos." },
   { view: "profile", label: "Perfil", icon: UserRound, access: ["patient", "doctor", "hospital", "admin"], summary: "Dados pessoais, contacto e preferências regionais." },
   { view: "settings", label: "Configuracoes", icon: Settings, access: ["patient", "doctor", "hospital", "admin"], summary: "Preferências, notificações e modo de demonstração." },
   { view: "admin", label: "Admin", icon: ShieldCheck, access: ["admin"], summary: "Auditoria, validações, gestão operacional e segurança." },
@@ -93,8 +93,12 @@ function canAccess(module: ModuleSpec, role: Role, authenticated: boolean) {
   return false;
 }
 
-function usePrivateQuery<T>(key: string[], queryFn: () => Promise<T>) {
-  return useQuery({ queryKey: key, queryFn, enabled: Boolean(getAccessToken()), retry: 1 });
+function roleHasWallet(role: Role) {
+  return role === "doctor" || role === "hospital";
+}
+
+function usePrivateQuery<T>(key: string[], queryFn: () => Promise<T>, enabled = true) {
+  return useQuery({ queryKey: key, queryFn, enabled: Boolean(getAccessToken()) && enabled, retry: 1 });
 }
 
 export function App() {
@@ -122,19 +126,20 @@ export function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, retry: 0 });
   const oauthProviders = useQuery({ queryKey: ["oauth-providers"], queryFn: api.oauthProviders, retry: 0 });
   const user = usePrivateQuery(["me"], api.me);
+  const role = roleFromUser(user.data, selectedRole);
+  const hasWallet = roleHasWallet(role);
   const appointmentsQuery = usePrivateQuery(["appointments"], api.appointments);
   const patientsQuery = usePrivateQuery(["patients"], api.patients);
   const doctorsQuery = usePrivateQuery(["doctors"], api.doctors);
   const hospitalsQuery = usePrivateQuery(["hospitals"], api.hospitals);
   const specialtiesQuery = usePrivateQuery(["specialties"], api.specialties);
-  const walletQuery = usePrivateQuery(["wallet"], api.wallet);
-  const transactionsQuery = usePrivateQuery(["wallet-transactions"], api.walletTransactions);
+  const walletQuery = usePrivateQuery(["wallet"], api.wallet, hasWallet);
+  const transactionsQuery = usePrivateQuery(["wallet-transactions"], api.walletTransactions, hasWallet);
   const recordsQuery = usePrivateQuery(["medical-records"], api.medicalRecords);
   const notificationsQuery = usePrivateQuery(["notifications"], api.notifications);
   const preferencesQuery = usePrivateQuery(["preferences"], api.preferences);
   const adminQuery = usePrivateQuery(["admin-summary"], api.adminSummary);
 
-  const role = roleFromUser(user.data, selectedRole);
   const visibleModules = modules.filter((item) => canAccess(item, role, authenticated));
   const allPrivateErrors = [appointmentsQuery, patientsQuery, doctorsQuery, hospitalsQuery, specialtiesQuery, recordsQuery, notificationsQuery, walletQuery, adminQuery].filter((query) => query.error);
 
