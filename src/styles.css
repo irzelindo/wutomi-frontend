@@ -131,6 +131,7 @@ button:disabled {
 .workspace {
   min-width: 0;
   padding: 24px;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -296,7 +297,7 @@ button,
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 14px;
   margin-bottom: 14px;
 }
@@ -328,7 +329,8 @@ button,
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  align-items: start;
   gap: 14px;
 }
 
@@ -404,7 +406,7 @@ button,
 .queue-grid,
 .admin-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
 }
 
@@ -422,6 +424,57 @@ button,
   color: var(--brand-strong);
   font-size: 30px;
   line-height: 1;
+}
+
+.patient-status {
+  display: grid;
+  gap: 4px;
+}
+
+.patient-status-lead {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+
+.patient-status-lead svg {
+  flex: 0 0 auto;
+  color: var(--brand);
+}
+
+.patient-status-lead div {
+  display: grid;
+  gap: 5px;
+}
+
+.patient-status-lead strong {
+  font-size: 17px;
+}
+
+.patient-status-lead span,
+.patient-status-row span {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.patient-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+
+.patient-status-row strong {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--brand-strong);
+  font-size: 18px;
 }
 
 .table-wrap {
@@ -560,7 +613,7 @@ th {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
   gap: 14px;
 }
 
@@ -773,29 +826,13 @@ th {
   accent-color: var(--brand);
 }
 
-.nav-list {
-  overflow: auto;
-  padding-right: 2px;
-}
-
-@media (max-width: 720px) {
-  .segmented,
-  .register-form {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-box {
-    width: 100%;
-  }
-}
-
 .compact-session {
   align-items: center;
 }
 
 .module-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -827,4 +864,68 @@ th {
   align-self: end;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.nav-list {
+  overflow: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 1320px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1020px) and (min-width: 721px) {
+  .metric-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .flow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 1021px) {
+  .app-shell {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 18px;
+  }
+
+  .workspace {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .segmented,
+  .register-form {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-box {
+    width: 100%;
+  }
+
+  .compact-session,
+  .notice {
+    align-items: stretch;
+  }
+
+  .compact-session .secondary-button,
+  .notice button {
+    width: 100%;
+  }
+
+  .notice {
+    flex-direction: column;
+  }
 }

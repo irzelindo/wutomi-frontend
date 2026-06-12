@@ -101,6 +101,41 @@ function canLoadRecords(role: Role) {
   return role === "patient" || role === "doctor" || role === "admin";
 }
 
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "");
+}
+
+function friendlyError(error: unknown, context: "login" | "register" | "forgot" | "profile" | "patient-profile" | "appointment" | "appointment-action" | "record" | "wallet" | "preferences" | "modules") {
+  if (context === "modules") return "Alguns dados não foram carregados. Atualize a página ou tente novamente.";
+  const message = errorText(error).toLowerCase();
+  if (context === "appointment" && (message.includes("outside doctor's availability") || message.includes("availability") || message.includes("requested time"))) {
+    return "O horário selecionado não está disponível para este médico. Escolha outro horário dentro da agenda disponível.";
+  }
+  if (message.includes("forbidden") || message.includes("permission")) {
+    return "A sua conta não tem permissão para realizar esta ação.";
+  }
+  if (message.includes("unauthorized") || message.includes("401")) {
+    return "A sua sessão expirou. Entre novamente para continuar.";
+  }
+  if (message.includes("bad_request") || message.includes("400")) {
+    return "Revise os dados preenchidos e tente novamente.";
+  }
+
+  const fallback: Record<Exclude<typeof context, "modules">, string> = {
+    login: "Não foi possível iniciar sessão. Verifique os dados e tente novamente.",
+    register: "Não foi possível criar a conta. Revise os dados e tente novamente.",
+    forgot: "Não foi possível enviar a recuperação de senha. Tente novamente em instantes.",
+    profile: "Não foi possível guardar o perfil. Revise os dados e tente novamente.",
+    "patient-profile": "Não foi possível preparar o perfil de paciente. Atualize a página ou tente novamente.",
+    appointment: "Não foi possível solicitar a marcação. Revise os dados e tente novamente.",
+    "appointment-action": "Não foi possível atualizar a consulta. Tente novamente.",
+    record: "Não foi possível guardar o prontuário. Tente novamente.",
+    wallet: "Não foi possível concluir a operação da carteira. Tente novamente.",
+    preferences: "Não foi possível atualizar a preferência. Tente novamente.",
+  };
+  return fallback[context];
+}
+
 function usePrivateQuery<T>(key: string[], queryFn: () => Promise<T>, enabled = true) {
   return useQuery({ queryKey: key, queryFn, enabled: Boolean(getAccessToken()) && enabled, retry: 1 });
 }
@@ -114,6 +149,7 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [demoMode, setDemoMode] = useState(false);
+  const [patientProfileAttempted, setPatientProfileAttempted] = useState(false);
 
   useEffect(() => {
     const oauthSession = readOauthSessionFromUrl();
@@ -164,25 +200,74 @@ export function App() {
   const adminSummary = adminQuery.data || (demoMode ? demoAdminSummary : emptyAdminSummary);
   const wallet = walletQuery.data || (demoMode ? demoWallet : { balance: 0, currency: "MZN" });
 
+  useEffect(() => {
+    if (role !== "patient" || demoMode || patientProfileAttempted || !user.data || !patientsQuery.isFetched || patients.length) return;
+    setPatientProfileAttempted(true);
+    api.createPatient({
+      user_id: user.data.id,
+      full_name: user.data.full_name,
+      phone: user.data.phone,
+      gender: user.data.gender,
+      date_of_birth: user.data.date_of_birth,
+      document_type: user.data.document_type,
+      document_number: user.data.document_number,
+      address: user.data.address,
+    }).then((patient) => {
+      queryClient.setQueryData(["patients", "patient"], { items: [patient], total: 1 });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+    }).catch((error) => {
+      setNotice(friendlyError(error, "patient-profile"));
+    });
+  }, [demoMode, patientProfileAttempted, patients.length, patientsQuery.isFetched, queryClient, role, user.data]);
+
   const login = useMutation({
     mutationFn: (payload: { email: string; password: string }) => api.login(payload.email, payload.password),
-    onSuccess: (session) => { setSession(session); setDemoMode(false); setNotice("Sessão iniciada. Vamos começar pela escolha do hospital."); setView("booking"); queryClient.invalidateQueries(); },
-    onError: (error) => setNotice(`Falha no login: ${error.message}`),
+    onSuccess: (session) => { setSession(session); setDemoMode(false); setPatientProfileAttempted(false); setNotice("Sessão iniciada. Vamos começar pela escolha do hospital."); setView("booking"); queryClient.invalidateQueries(); },
+    onError: (error) => setNotice(friendlyError(error, "login")),
   });
 
   const register = useMutation({
     mutationFn: (payload: { email: string; full_name: string; password: string; role: string }) => api.register({ email: payload.email, full_name: payload.full_name, password: payload.password }),
     onSuccess: (_, payload) => { setNotice(`Conta criada para ${payload.full_name}. Entre e complete o perfil de ${roleLabel(payload.role)}.`); setSelectedRole(payload.role as Role); setAuthMode("login"); },
-    onError: (error) => setNotice(`Nao foi possivel cadastrar: ${error.message}`),
+    onError: (error) => setNotice(friendlyError(error, "register")),
   });
 
-  const forgot = useMutation({ mutationFn: api.forgotPassword, onSuccess: (data) => setNotice(data.reset_token ? `${data.message}. Token dev: ${data.reset_token}` : data.message), onError: (error) => setNotice(`Falha ao recuperar senha: ${error.message}`) });
-  const updateProfile = useMutation({ mutationFn: (payload: unknown) => api.updateUser(user.data?.id || "", payload), onSuccess: () => { setNotice("Perfil atualizado."); queryClient.invalidateQueries({ queryKey: ["me"] }); }, onError: (error) => setNotice(`Nao foi possivel atualizar perfil: ${error.message}`) });
-  const appointmentAction = useMutation({ mutationFn: ({ id, action }: { id: string; action: "confirm" | "check-in" | "complete" }) => action === "confirm" ? api.confirmAppointment(id) : action === "check-in" ? api.checkInAppointment(id) : api.completeAppointment(id), onSuccess: () => { setNotice("Consulta atualizada."); queryClient.invalidateQueries({ queryKey: ["appointments"] }); }, onError: (error) => setNotice(`Nao foi possivel atualizar: ${error.message}`) });
-  const createAppointment = useMutation({ mutationFn: (payload: unknown) => api.createAppointment(payload), onSuccess: () => { setNotice("Pedido de consulta enviado. O médico deverá confirmar a marcação."); queryClient.invalidateQueries({ queryKey: ["appointments"] }); setView("appointments"); }, onError: (error) => setNotice(`Nao foi possivel criar consulta: ${error.message}`) });
-  const createRecord = useMutation({ mutationFn: api.createMedicalRecord, onSuccess: () => { setNotice("Prontuario criado."); queryClient.invalidateQueries({ queryKey: ["medical-records"] }); }, onError: (error) => setNotice(`Nao foi possivel criar prontuario: ${error.message}`) });
-  const topUp = useMutation({ mutationFn: api.topUpWallet, onSuccess: () => { setNotice("Pedido de carregamento enviado."); queryClient.invalidateQueries({ queryKey: ["wallet"] }); queryClient.invalidateQueries({ queryKey: ["wallet-transactions"] }); }, onError: (error) => setNotice(`Nao foi possivel carregar: ${error.message}`) });
-  const updatePreference = useMutation({ mutationFn: api.updatePreference, onSuccess: () => { setNotice("Preferencia atualizada."); queryClient.invalidateQueries({ queryKey: ["preferences"] }); }, onError: (error) => setNotice(`Nao foi possivel atualizar preferencia: ${error.message}`) });
+  const forgot = useMutation({ mutationFn: api.forgotPassword, onSuccess: () => setNotice("Se o email estiver registado, enviaremos instruções para recuperar a senha."), onError: (error) => setNotice(friendlyError(error, "forgot")) });
+  const updateProfile = useMutation({
+    mutationFn: async (payload: unknown) => {
+      const updatedUser = await api.updateUser(user.data?.id || "", payload);
+      let patient: Patient | undefined;
+      if (role === "patient") {
+        const currentPatient = await api.patientMe();
+        patient = pageItems(currentPatient)[0];
+        if (!patient) {
+          patient = await api.createPatient({
+            user_id: updatedUser.id,
+            full_name: updatedUser.full_name,
+            phone: updatedUser.phone,
+            gender: updatedUser.gender,
+            date_of_birth: updatedUser.date_of_birth,
+            document_type: updatedUser.document_type,
+            document_number: updatedUser.document_number,
+            address: updatedUser.address,
+          });
+        }
+      }
+      return { updatedUser, patient };
+    },
+    onSuccess: (data) => {
+      setNotice(data.patient ? "Perfil de paciente atualizado. Já pode marcar consulta." : "Perfil atualizado.");
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      if (data.patient) queryClient.setQueryData(["patients", "patient"], { items: [data.patient], total: 1 });
+    },
+    onError: (error) => setNotice(friendlyError(error, "profile")),
+  });
+  const appointmentAction = useMutation({ mutationFn: ({ id, action }: { id: string; action: "confirm" | "check-in" | "complete" }) => action === "confirm" ? api.confirmAppointment(id) : action === "check-in" ? api.checkInAppointment(id) : api.completeAppointment(id), onSuccess: () => { setNotice("Consulta atualizada."); queryClient.invalidateQueries({ queryKey: ["appointments"] }); }, onError: (error) => setNotice(friendlyError(error, "appointment-action")) });
+  const createAppointment = useMutation({ mutationFn: (payload: unknown) => api.createAppointment(payload), onSuccess: () => { setNotice("Pedido de consulta enviado. O médico deverá confirmar a marcação."); queryClient.invalidateQueries({ queryKey: ["appointments"] }); setView("appointments"); }, onError: (error) => setNotice(friendlyError(error, "appointment")) });
+  const createRecord = useMutation({ mutationFn: api.createMedicalRecord, onSuccess: () => { setNotice("Prontuário criado."); queryClient.invalidateQueries({ queryKey: ["medical-records"] }); }, onError: (error) => setNotice(friendlyError(error, "record")) });
+  const topUp = useMutation({ mutationFn: api.topUpWallet, onSuccess: () => { setNotice("Pedido de carregamento enviado."); queryClient.invalidateQueries({ queryKey: ["wallet"] }); queryClient.invalidateQueries({ queryKey: ["wallet-transactions"] }); }, onError: (error) => setNotice(friendlyError(error, "wallet")) });
+  const updatePreference = useMutation({ mutationFn: api.updatePreference, onSuccess: () => { setNotice("Preferência atualizada."); queryClient.invalidateQueries({ queryKey: ["preferences"] }); }, onError: (error) => setNotice(friendlyError(error, "preferences")) });
 
   const todayAppointments = useMemo(() => {
     const today = new Date().toDateString();
@@ -191,7 +276,7 @@ export function App() {
 
   async function logout() {
     try { if (authenticated) await api.logout(); } catch { /* logout local mesmo com token expirado */ }
-    setSession(null); setNotice("Sessao terminada."); queryClient.clear(); setView("overview");
+    setSession(null); setPatientProfileAttempted(false); setNotice("Sessao terminada."); queryClient.clear(); setView("overview");
   }
 
   function refreshAll() { queryClient.invalidateQueries(); health.refetch(); }
@@ -226,12 +311,12 @@ export function App() {
 
         {view === "overview" && <Overview role={role} authenticated={authenticated} demoMode={demoMode} modules={visibleModules} appointments={appointments} todayAppointments={todayAppointments} pending={appointments.filter((item) => item.status === "pending").length} active={appointments.filter((item) => item.status === "in_progress").length} completed={appointments.filter((item) => item.status === "completed").length} patients={patients.length} doctors={doctors.length} hospitals={hospitals.length} revenue={adminSummary.total_revenue} />}
         {view === "auth" && <AuthModule providers={oauthProviders.data || []} />}
-        {view === "appointments" && <RequireAuth authenticated={authenticated}><AppointmentsView appointments={appointments} onAction={(id, action) => appointmentAction.mutate({ id, action })} /></RequireAuth>}
+        {view === "appointments" && <RequireAuth authenticated={authenticated}><AppointmentsView role={role} appointments={appointments} onAction={(id, action) => appointmentAction.mutate({ id, action })} /></RequireAuth>}
         {view === "booking" && <RequireAuth authenticated={authenticated}><BookingView hospitals={hospitals} patients={patients} disabled={!authenticated} demoMode={demoMode} onSubmit={(body) => createAppointment.mutate(body)} /></RequireAuth>}
         {view === "patients" && <RequireAuth authenticated={authenticated}><PeopleView title="Pacientes" search={search} onSearch={setSearch} items={patients.filter((item) => personName(item).toLowerCase().includes(search.toLowerCase()))} render={(patient) => <PatientCard patient={patient} />} /></RequireAuth>}
         {view === "doctors" && <RequireAuth authenticated={authenticated}><PeopleView title="Medicos" search={search} onSearch={setSearch} items={doctors.filter((item) => `${doctorName(item)} ${item.specialty || ""}`.toLowerCase().includes(search.toLowerCase()))} render={(doctor) => <DoctorCard doctor={doctor} />} /></RequireAuth>}
-        {view === "hospitals" && <RequireAuth authenticated={authenticated}><HospitalsView hospitals={hospitals} /></RequireAuth>}
-        {view === "specialties" && <RequireAuth authenticated={authenticated}><SpecialtiesView specialties={specialties} /></RequireAuth>}
+        {view === "hospitals" && <RequireAuth authenticated={authenticated}><HospitalsView hospitals={hospitals} search={search} onSearch={setSearch} /></RequireAuth>}
+        {view === "specialties" && <RequireAuth authenticated={authenticated}><SpecialtiesView specialties={specialties} search={search} onSearch={setSearch} /></RequireAuth>}
         {view === "records" && <RequireAuth authenticated={authenticated}><RecordsView records={records} patients={patients} doctors={doctors} appointments={appointments} disabled={!authenticated} onCreate={(payload) => createRecord.mutate(payload)} /></RequireAuth>}
         {view === "notifications" && <RequireAuth authenticated={authenticated}><NotificationsView notifications={notifications} preferences={preferences} onPreference={(payload) => updatePreference.mutate(payload)} /></RequireAuth>}
         {view === "wallet" && <RequireAuth authenticated={authenticated}><WalletView wallet={wallet} transactions={transactions} disabled={!authenticated} onTopUp={(payload) => topUp.mutate(payload)} /></RequireAuth>}
@@ -248,7 +333,7 @@ function dataOrDemo<T>(payload: { items?: T[]; results?: T[] } | T[] | undefined
 function roleLabel(role: string) { return role === "doctor" ? "Medico" : role === "hospital" ? "Hospital" : role === "admin" ? "Admin" : "Paciente"; }
 
 function AuthenticatedBar({ user, role, onLogout }: { user?: CurrentUser; role: Role; onLogout: () => void }) { return <section className="session-panel compact-session"><div><span className="section-kicker">Sessao</span><h2>{user?.full_name || user?.email || "Utilizador autenticado"}</h2><p>{roleLabel(role)} · {user?.is_verified ? "email verificado" : "email por verificar"}</p></div><button onClick={onLogout} className="secondary-button"><LogOut size={17} /> Sair</button></section>; }
-function ApiErrorBanner({ errors }: { errors: Error[] }) { return <section className="notice"><Bell size={17} /><span>Alguns módulos não carregaram. Esta conta pode não ter permissão para tudo: {errors[0]?.message}</span></section>; }
+function ApiErrorBanner({ errors }: { errors: Error[] }) { return <section className="notice"><Bell size={17} /><span>{friendlyError(errors[0], "modules")}</span></section>; }
 function RequireAuth({ authenticated, children }: { authenticated: boolean; children: React.ReactNode }) { return authenticated ? <>{children}</> : <Panel title="Sessao necessaria"><p className="empty-state">Entre para carregar os dados deste módulo.</p></Panel>; }
 function RequireRole({ role, required, children }: { role: Role; required: Role; children: React.ReactNode }) { return role === required ? <>{children}</> : <Panel title="Acesso restrito"><p className="empty-state">Este modulo exige perfil {roleLabel(required)}.</p></Panel>; }
 
@@ -257,10 +342,67 @@ function SessionPanel(props: { mode: AuthMode; setMode: (mode: AuthMode) => void
   return <section className="session-panel auth-expanded"><div className="auth-copy"><span className="section-kicker">Acesso</span><h2>Entrar ou criar conta</h2><p>O cadastro cria uma conta comum. Perfil admin só pode ser atribuído pela equipa administrativa.</p></div><div className="auth-box"><div className="segmented"><button className={props.mode === "login" ? "active" : ""} onClick={() => props.setMode("login")}>Login</button><button className={props.mode === "register" ? "active" : ""} onClick={() => props.setMode("register")}>Cadastro</button><button className={props.mode === "oauth" ? "active" : ""} onClick={() => props.setMode("oauth")}>OAuth</button><button className={props.mode === "forgot" ? "active" : ""} onClick={() => props.setMode("forgot")}>Senha</button></div>{props.mode === "login" && <form className="login-form" onSubmit={(event) => { event.preventDefault(); props.onLogin({ email, password }); }}><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email@exemplo.com" /><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Palavra-passe" /><button disabled={props.loading}><KeyRound size={16} /> Entrar</button></form>}{props.mode === "register" && <form className="login-form register-form" onSubmit={(event) => { event.preventDefault(); props.onRegister({ email, full_name: fullName, password, role: props.role }); }}><input required value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Nome completo" /><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email@exemplo.com" /><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimo 8 caracteres" /><select value={props.role === "admin" ? "patient" : props.role} onChange={(event) => props.setRole(event.target.value as Role)}><option value="patient">Paciente</option><option value="doctor">Medico</option><option value="hospital">Hospital</option></select><button disabled={props.loading}><UserPlus size={16} /> Criar conta</button></form>}{props.mode === "oauth" && <div className="oauth-grid">{props.providers.length ? props.providers.map((provider) => <button key={provider.provider} disabled={!provider.configured} onClick={() => props.onOauth(provider.provider)}>{provider.display_name}{!provider.configured ? " indisponivel" : ""}</button>) : <p className="empty-state">Nenhum provedor social disponível neste momento.</p>}</div>}{props.mode === "forgot" && <form className="login-form" onSubmit={(event) => { event.preventDefault(); props.onForgot(email); }}><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email@exemplo.com" /><button disabled={props.loading}>Enviar recuperacao</button></form>}</div></section>;
 }
 
-function Overview({ role, authenticated, demoMode, modules, appointments, todayAppointments, pending, active, completed, patients, doctors, hospitals, revenue }: { role: Role; authenticated: boolean; demoMode: boolean; modules: ModuleSpec[]; appointments: Appointment[]; todayAppointments: Appointment[]; pending: number; active: number; completed: number; patients: number; doctors: number; hospitals: number; revenue: string | number }) { return <><section className="metric-grid"><Metric label="Consultas hoje" value={todayAppointments.length} hint={authenticated ? "Actualizadas" : "Entre para ver"} icon={CalendarDays} /><Metric label="Pendentes" value={pending} hint="Aguardam confirmacao" icon={BadgeCheck} /><Metric label="Cadastros" value={role === "patient" ? doctors + hospitals : patients + doctors + hospitals} hint={role === "patient" ? doctors + " medicos · " + hospitals + " hospitais" : patients + " pacientes · " + doctors + " medicos · " + hospitals + " hospitais"} icon={HeartPulse} /><Metric label="Receita" value={formatMoney(revenue)} hint="Pagamentos concluidos" icon={CreditCard} /></section>{!authenticated && !demoMode && <Panel title="Dados reais protegidos"><p className="empty-state">Entre com uma conta real ou ative o modo demonstração em Configurações para explorar os módulos.</p></Panel>}<section className="content-grid"><Panel title={`Módulos para ${roleLabel(role)}`}><div className="module-grid">{modules.map((module) => { const Icon = module.icon; return <article className="module-card" key={module.view}><Icon size={18} /><strong>{module.label}</strong><span>{module.summary}</span><small>{module.access.includes("patient") ? "Disponível no fluxo do paciente" : "Área operacional"}</small></article>; })}</div></Panel><Panel title="Fila clinica"><div className="queue-grid"><QueueItem value={pending} label="Por confirmar" /><QueueItem value={active} label="Em atendimento" /><QueueItem value={completed} label="Concluidas" /></div></Panel></section>{appointments.length > 0 && <Panel title="Agenda imediata"><Timeline items={todayAppointments.length ? todayAppointments : appointments.slice(0, 4)} render={(item) => <><strong>{formatDate(item.scheduled_start)} · {item.patient_full_name || item.patient_id}</strong><span>{item.doctor_full_name || item.doctor_id} · {item.doctor_specialty || "Especialidade"}</span><StatusPill value={item.status} /></>} /></Panel>}</>; }
+function Overview({ role, authenticated, demoMode, modules, appointments, todayAppointments, pending, active, completed, patients, doctors, hospitals, revenue }: { role: Role; authenticated: boolean; demoMode: boolean; modules: ModuleSpec[]; appointments: Appointment[]; todayAppointments: Appointment[]; pending: number; active: number; completed: number; patients: number; doctors: number; hospitals: number; revenue: string | number }) {
+  const showOperationalMetrics = role !== "patient";
+  const nextAppointment = appointments
+    .filter((item) => new Date(item.scheduled_start).getTime() >= Date.now())
+    .sort((a, b) => new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime())[0];
+
+  return <>
+    <section className="metric-grid">
+      <Metric label="Consultas hoje" value={todayAppointments.length} hint={authenticated ? "Actualizadas" : "Entre para ver"} icon={CalendarDays} />
+      <Metric label="Pendentes" value={pending} hint="Aguardam confirmacao" icon={BadgeCheck} />
+      {showOperationalMetrics && <Metric label="Cadastros" value={patients + doctors + hospitals} hint={`${patients} pacientes · ${doctors} medicos · ${hospitals} hospitais`} icon={HeartPulse} />}
+      {showOperationalMetrics && <Metric label="Receita" value={formatMoney(revenue)} hint="Pagamentos concluidos" icon={CreditCard} />}
+    </section>
+    {!authenticated && !demoMode && <Panel title="Dados reais protegidos"><p className="empty-state">Entre com uma conta real ou ative o modo demonstração em Configurações para explorar os módulos.</p></Panel>}
+    <section className="content-grid">
+      <Panel title={`Módulos para ${roleLabel(role)}`}>
+        <div className="module-grid">{modules.map((module) => { const Icon = module.icon; return <article className="module-card" key={module.view}><Icon size={18} /><strong>{module.label}</strong><span>{module.summary}</span><small>{module.access.includes("patient") ? "Disponível no fluxo do paciente" : "Área operacional"}</small></article>; })}</div>
+      </Panel>
+      {role === "patient" ? <PatientOverviewPanel nextAppointment={nextAppointment} pending={pending} completed={completed} /> : <OperationalQueuePanel pending={pending} active={active} completed={completed} />}
+    </section>
+    {appointments.length > 0 && <Panel title="Agenda imediata"><Timeline items={todayAppointments.length ? todayAppointments : appointments.slice(0, 4)} render={(item) => <><strong>{formatDate(item.scheduled_start)} · {item.patient_full_name || item.patient_id}</strong><span>{item.doctor_full_name || item.doctor_id} · {item.doctor_specialty || "Especialidade"}</span><StatusPill value={item.status} /></>} /></Panel>}
+  </>;
+}
+
+function PatientOverviewPanel({ nextAppointment, pending, completed }: { nextAppointment?: Appointment; pending: number; completed: number }) {
+  return <Panel title="Acompanhamento">
+    <div className="patient-status">
+      <div className="patient-status-lead">
+        <CalendarDays size={20} />
+        <div>
+          <strong>{nextAppointment ? formatDate(nextAppointment.scheduled_start) : "Sem consulta marcada"}</strong>
+          <span>{nextAppointment ? nextAppointment.doctor_full_name || nextAppointment.doctor_specialty || "Consulta agendada" : "Marque uma consulta quando precisar de atendimento."}</span>
+        </div>
+      </div>
+      <div className="patient-status-row"><span>Por confirmar</span><strong>{pending}</strong></div>
+      <div className="patient-status-row"><span>Concluídas</span><strong>{completed}</strong></div>
+    </div>
+  </Panel>;
+}
+
+function OperationalQueuePanel({ pending, active, completed }: { pending: number; active: number; completed: number }) {
+  return <Panel title="Fila clinica"><div className="queue-grid"><QueueItem value={pending} label="Por confirmar" /><QueueItem value={active} label="Em atendimento" /><QueueItem value={completed} label="Concluidas" /></div></Panel>;
+}
 
 function AuthModule({ providers }: { providers: { provider: string; display_name: string; configured: boolean }[] }) { return <Panel title="Formas de acesso"><div className="module-grid"><article className="module-card"><KeyRound size={18} /><strong>Email e palavra-passe</strong><span>Entrar com a conta Wutomi e manter a sessão segura.</span></article>{providers.map((provider) => <article className="module-card" key={provider.provider}><ShieldCheck size={18} /><strong>{provider.display_name}</strong><span>{provider.configured ? "Disponível" : "Indisponível"}</span></article>)}</div></Panel>; }
-function AppointmentsView({ appointments, onAction }: { appointments: Appointment[]; onAction: (id: string, action: "confirm" | "check-in" | "complete") => void }) { const [status, setStatus] = useState(""); const filtered = appointments.filter((item) => !status || item.status === status); return <Panel title="Consultas" action={<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Todos estados</option><option value="pending">Pendente</option><option value="confirmed">Confirmada</option><option value="in_progress">Em consulta</option><option value="completed">Concluida</option><option value="cancelled">Cancelada</option></select>}><div className="table-wrap"><table><thead><tr><th>Hora</th><th>Paciente</th><th>Medico</th><th>Especialidade</th><th>Estado</th><th>Acoes</th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td>{formatDate(item.scheduled_start)}</td><td>{item.patient_full_name || item.patient_id}</td><td>{item.doctor_full_name || item.doctor_id}</td><td>{item.doctor_specialty || "-"}</td><td><StatusPill value={item.status} /></td><td><div className="row-actions"><button onClick={() => onAction(item.id, "confirm")}>Confirmar</button><button onClick={() => onAction(item.id, "check-in")}>Check-in</button><button onClick={() => onAction(item.id, "complete")}>Concluir</button></div></td></tr>)}</tbody></table>{!filtered.length && <p className="empty-state">Sem consultas para esta sessão.</p>}</div></Panel>; }
+function AppointmentsView({ role, appointments, onAction }: { role: Role; appointments: Appointment[]; onAction: (id: string, action: "confirm" | "check-in" | "complete") => void }) {
+  const [status, setStatus] = useState("");
+  const filtered = appointments.filter((item) => !status || item.status === status);
+  const showActions = role === "doctor" || role === "hospital" || role === "admin";
+  const canConfirm = role === "doctor" || role === "admin";
+
+  return <Panel title="Consultas" action={<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Todos estados</option><option value="pending">Pendente</option><option value="confirmed">Confirmada</option><option value="in_progress">Em consulta</option><option value="completed">Concluida</option><option value="cancelled">Cancelada</option></select>}>
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Hora</th><th>Paciente</th><th>Medico</th><th>Especialidade</th><th>Estado</th>{showActions && <th>Acoes</th>}</tr></thead>
+        <tbody>{filtered.map((item) => <tr key={item.id}><td>{formatDate(item.scheduled_start)}</td><td>{item.patient_full_name || item.patient_id}</td><td>{item.doctor_full_name || item.doctor_id}</td><td>{item.doctor_specialty || "-"}</td><td><StatusPill value={item.status} /></td>{showActions && <td><div className="row-actions">{canConfirm && <button onClick={() => onAction(item.id, "confirm")}>Confirmar</button>}<button onClick={() => onAction(item.id, "check-in")}>Check-in</button><button onClick={() => onAction(item.id, "complete")}>Concluir</button></div></td>}</tr>)}</tbody>
+      </table>
+      {!filtered.length && <p className="empty-state">Sem consultas para esta sessão.</p>}
+    </div>
+  </Panel>;
+}
 function BookingView({ hospitals, patients, disabled, demoMode, onSubmit }: { hospitals: HospitalType[]; patients: Patient[]; disabled: boolean; demoMode: boolean; onSubmit: (body: unknown) => void }) {
   const [hospitalId, setHospitalId] = useState("");
   const [specialtyId, setSpecialtyId] = useState("");
@@ -376,12 +518,20 @@ function FlowStep({ number, label, active }: { number: number; label: string; ac
   return <div className={`flow-step ${active ? "active" : ""}`}><span>{number}</span><strong>{label}</strong></div>;
 }
 
-function ProfileView({ user, role, disabled, onSubmit }: { user?: CurrentUser; role: Role; disabled: boolean; onSubmit: (payload: unknown) => void }) { return <section className="content-grid"><Panel title="Dados pessoais"><form className="form-grid" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSubmit(Object.fromEntries(data.entries())); }}><label>Nome<input name="full_name" defaultValue={user?.full_name || ""} /></label><label>Email<input name="email" type="email" defaultValue={user?.email || ""} /></label><label>Telefone<input name="phone" defaultValue={user?.phone || ""} /></label><label>Genero<input name="gender" defaultValue={user?.gender || ""} /></label><label>Documento<input name="document_type" defaultValue={user?.document_type || "BI"} /></label><label>Numero<input name="document_number" defaultValue={user?.document_number || ""} /></label><label className="wide">Endereco<input name="address" defaultValue={user?.address || ""} /></label><label>Locale<input name="locale" defaultValue={user?.locale || "pt-MZ"} /></label><label>Timezone<input name="timezone" defaultValue={user?.timezone || "Africa/Maputo"} /></label><label>Tipo<input disabled value={roleLabel(role)} /></label><button disabled={disabled}>{disabled ? "Entre para editar" : "Guardar perfil"}</button></form></Panel><Panel title="Perfil operacional"><div className="timeline"><article className="timeline-item"><strong>Paciente</strong><span>Complete dados clinicos no modulo Pacientes.</span></article><article className="timeline-item"><strong>Medico</strong><span>Crie perfil medico, especialidades, disponibilidade e carteira.</span></article><article className="timeline-item"><strong>Hospital</strong><span>Associe equipa, medicos, pacientes e agenda.</span></article></div></Panel></section>; }
+function ProfileView({ user, role, disabled, onSubmit }: { user?: CurrentUser; role: Role; disabled: boolean; onSubmit: (payload: unknown) => void }) { return <Panel title="Dados pessoais"><form className="form-grid" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSubmit(Object.fromEntries(data.entries())); }}><label>Nome<input name="full_name" defaultValue={user?.full_name || ""} /></label><label>Email<input name="email" type="email" defaultValue={user?.email || ""} /></label><label>Telefone<input name="phone" defaultValue={user?.phone || ""} /></label><label>Genero<input name="gender" defaultValue={user?.gender || ""} /></label><label>Documento<input name="document_type" defaultValue={user?.document_type || "BI"} /></label><label>Numero<input name="document_number" defaultValue={user?.document_number || ""} /></label><label className="wide">Endereco<input name="address" defaultValue={user?.address || ""} /></label><label>Locale<input name="locale" defaultValue={user?.locale || "pt-MZ"} /></label><label>Timezone<input name="timezone" defaultValue={user?.timezone || "Africa/Maputo"} /></label><label>Tipo<input disabled value={roleLabel(role)} /></label><button disabled={disabled}>{disabled ? "Entre para editar" : "Guardar perfil"}</button></form></Panel>; }
 function RecordsView({ records, patients, doctors, appointments, disabled, onCreate }: { records: MedicalRecord[]; patients: Patient[]; doctors: Doctor[]; appointments: Appointment[]; disabled: boolean; onCreate: (payload: unknown) => void }) { return <section className="content-grid"><Panel title="Prontuarios"><Timeline items={records} render={(item) => <><strong>{item.patient_full_name || item.patient_id}</strong><span>{item.chief_complaint || "Sem queixa"} · {item.assessment || "Sem avaliacao"}</span><span>{formatDate(item.created_at)}</span></>} /></Panel><Panel title="Novo registo clinico"><form className="stacked-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onCreate(Object.fromEntries(data.entries())); }}><SelectField name="patient_id" label="Paciente" items={patients.map((item) => ({ value: item.id, label: personName(item) }))} /><SelectField name="doctor_id" label="Medico" items={doctors.map((item) => ({ value: item.id, label: doctorName(item) }))} /><SelectField name="appointment_id" label="Consulta" items={appointments.map((item) => ({ value: item.id, label: `${formatDate(item.scheduled_start)} · ${item.patient_full_name || item.patient_id}` }))} /><textarea name="chief_complaint" rows={2} placeholder="Queixa principal" /><textarea name="assessment" rows={2} placeholder="Avaliacao" /><textarea name="plan" rows={2} placeholder="Plano" /><button disabled={disabled}>{disabled ? "Entre para criar" : "Criar prontuario"}</button></form></Panel></section>; }
 function NotificationsView({ notifications, preferences, onPreference }: { notifications: { id: string; channel: string; subject?: string | null; body: string; status: string; created_at: string }[]; preferences: { channel: string; enabled: boolean }[]; onPreference: (payload: { channel: string; enabled: boolean }) => void }) { return <section className="content-grid"><Panel title="Notificacoes"><Timeline items={notifications} render={(item) => <><strong>{item.subject || item.channel}</strong><span>{item.body}</span><StatusPill value={item.status} /></>} /></Panel><Panel title="Preferencias"><PreferenceList preferences={preferences} onPreference={onPreference} /></Panel></section>; }
 function WalletView({ wallet, transactions, disabled, onTopUp }: { wallet: { balance: string | number; currency: string }; transactions: { id: number; amount: string | number; direction: string; description?: string | null; transaction_type?: string; created_at: string }[]; disabled: boolean; onTopUp: (payload: unknown) => void }) { return <section className="content-grid"><Panel title="Carteira"><div className="wallet-card"><span>Saldo disponivel</span><strong>{formatMoney(wallet.balance, wallet.currency)}</strong></div><form className="stacked-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onTopUp({ amount: data.get("amount"), provider: data.get("provider"), phone_number: data.get("phone") }); }}><input required name="amount" type="number" min="1" step="0.01" placeholder="Valor" /><select name="provider"><option value="mpesa">M-Pesa</option><option value="mkesh">mKesh</option><option value="emola">e-Mola</option></select><input required name="phone" placeholder="841234567" /><button disabled={disabled}>{disabled ? "Entre para carregar" : "Carregar carteira"}</button></form></Panel><Panel title="Movimentos"><Timeline items={transactions} render={(item) => <><strong>{item.direction === "credit" ? "+" : "-"} {formatMoney(item.amount)}</strong><span>{item.description || item.transaction_type || "Movimento"} · {formatDate(item.created_at)}</span></>} /></Panel></section>; }
-function HospitalsView({ hospitals }: { hospitals: HospitalType[] }) { return <PeopleView title="Hospitais" search="" onSearch={() => undefined} items={hospitals} render={(item) => <article className="person-card"><div><h3>{item.name}</h3><p>{[item.city, item.province, item.country].filter(Boolean).join(" · ") || "Localizacao por definir"}</p></div><div className="badge-row"><span className="badge">{item.is_active === false ? "Inativo" : "Ativo"}</span><span className="badge">{item.id}</span></div></article>} />; }
-function SpecialtiesView({ specialties }: { specialties: Specialty[] }) { return <PeopleView title="Especialidades" search="" onSearch={() => undefined} items={specialties} render={(item) => <article className="person-card"><div><h3>{item.name}</h3><p>{item.description || item.details || "Descrição em revisão clínica."}</p></div></article>} />; }
+function HospitalsView({ hospitals, search, onSearch }: { hospitals: HospitalType[]; search: string; onSearch: (value: string) => void }) {
+  const normalizedSearch = search.toLowerCase();
+  const filtered = hospitals.filter((item) => `${item.name} ${item.city || ""} ${item.province || ""} ${item.country || ""}`.toLowerCase().includes(normalizedSearch));
+  return <PeopleView title="Hospitais" search={search} onSearch={onSearch} items={filtered} render={(item) => <article className="person-card"><div><h3>{item.name}</h3><p>{[item.city, item.province, item.country].filter(Boolean).join(" · ") || "Localizacao por definir"}</p></div><div className="badge-row"><span className="badge">{item.is_active === false ? "Inativo" : "Ativo"}</span><span className="badge">{item.id}</span></div></article>} />;
+}
+function SpecialtiesView({ specialties, search, onSearch }: { specialties: Specialty[]; search: string; onSearch: (value: string) => void }) {
+  const normalizedSearch = search.toLowerCase();
+  const filtered = specialties.filter((item) => `${item.name} ${item.description || ""} ${item.details || ""} ${item.classification || ""} ${item.grouping || ""}`.toLowerCase().includes(normalizedSearch));
+  return <PeopleView title="Especialidades" search={search} onSearch={onSearch} items={filtered} render={(item) => <article className="person-card"><div><h3>{item.name}</h3><p>{item.description || item.details || "Descrição em revisão clínica."}</p></div></article>} />;
+}
 function SettingsView({ demoMode, setDemoMode, preferences, onPreference }: { demoMode: boolean; setDemoMode: (value: boolean) => void; preferences: { channel: string; enabled: boolean }[]; onPreference: (payload: { channel: string; enabled: boolean }) => void }) { return <section className="content-grid"><Panel title="Aplicacao"><div className="settings-list"><div><strong>Ligação</strong><span>Serviço Wutomi</span></div><label className="toggle-row"><span>Modo demonstracao</span><input type="checkbox" checked={demoMode} onChange={(event) => setDemoMode(event.target.checked)} /></label><div><strong>Locale</strong><span>pt-MZ</span></div><div><strong>Timezone</strong><span>Africa/Maputo</span></div></div></Panel><Panel title="Canais"><PreferenceList preferences={preferences} onPreference={onPreference} /></Panel></section>; }
 function PreferenceList({ preferences, onPreference }: { preferences: { channel: string; enabled: boolean }[]; onPreference: (payload: { channel: string; enabled: boolean }) => void }) { if (!preferences.length) return <p className="empty-state">Sem preferencias carregadas para esta sessao.</p>; return <div className="settings-list">{preferences.map((item) => <label key={item.channel} className="toggle-row"><span>{item.channel}</span><input type="checkbox" checked={item.enabled} onChange={(event) => onPreference({ channel: item.channel, enabled: event.target.checked })} /></label>)}</div>; }
 function AdminView({ summary }: { summary: Record<string, string | number | undefined> }) { const metrics = [["Utilizadores", summary.total_users], ["Medicos ativos", summary.active_doctors], ["Pacientes", summary.total_patients], ["Consultas", summary.total_appointments], ["Pendentes", summary.pending_appointments], ["Receita", formatMoney(summary.total_revenue)]]; return <section className="content-grid"><Panel title="Indicadores admin"><div className="admin-grid">{metrics.map(([label, value]) => <div key={label}><strong>{value || 0}</strong><span>{label}</span></div>)}</div></Panel><Panel title="Governanca"><div className="timeline-item"><strong>Auditoria, aprovacoes e catalogo clinico</strong><span>Área ligada à governação da plataforma e segurança operacional.</span></div></Panel></section>; }
