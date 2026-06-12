@@ -97,6 +97,8 @@ export type Specialty = {
   id: string;
   name: string;
   description?: string | null;
+  details?: string | null;
+  locale?: string | null;
   classification?: string | null;
   grouping?: string | null;
   coding_code?: string | null;

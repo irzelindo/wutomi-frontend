@@ -16,8 +16,10 @@ import type {
   WalletTransaction,
 } from "./types";
 
+export const API_TARGET_URL = "https://api.wutomi.com";
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "https://api.wutomi.com";
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ||
+  (import.meta.env.DEV ? "/remote" : API_TARGET_URL);
 
 let accessToken = localStorage.getItem("wutomi.accessToken") || "";
 let refreshToken = localStorage.getItem("wutomi.refreshToken") || "";
@@ -40,6 +42,20 @@ export function setAccessToken(token: string) {
   else localStorage.removeItem("wutomi.accessToken");
 }
 
+export function readOauthSessionFromUrl(): TokenResponse | null {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const access = params.get("access_token");
+  const refresh = params.get("refresh_token");
+  if (!access || !refresh) return null;
+  return { access_token: access, refresh_token: refresh, token_type: params.get("token_type") || "bearer" };
+}
+
+export function clearOauthHash() {
+  if (window.location.hash.includes("access_token")) {
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+  }
+}
+
 export function getAccessToken() {
   return accessToken;
 }
@@ -48,7 +64,7 @@ export function getRefreshToken() {
   return refreshToken;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -92,13 +108,28 @@ export const api = {
   completeAppointment: (id: string) => request<Appointment>(`/api/v1/appointments/${id}/complete`, { method: "POST" }),
   cancelAppointment: (id: string, reason: string) =>
     request<Appointment>(`/api/v1/appointments/${id}/cancel`, { method: "POST", body: JSON.stringify({ cancellation_reason: reason }) }),
-  patients: () => request<PaginatedResponse<Patient>>("/api/v1/patients/"),
+  patients: async () => {
+    try {
+      return await request<PaginatedResponse<Patient>>("/api/v1/patients/");
+    } catch {
+      try {
+        const patient = await request<Patient>("/api/v1/patients/me");
+        return { items: [patient], total: 1 };
+      } catch {
+        return { items: [], total: 0 };
+      }
+    }
+  },
   createPatient: (payload: unknown) => request<Patient>("/api/v1/patients/", { method: "POST", body: JSON.stringify(payload) }),
   doctors: () => request<PaginatedResponse<Doctor>>("/api/v1/doctors/"),
   createDoctor: (payload: unknown) => request<Doctor>("/api/v1/doctors/", { method: "POST", body: JSON.stringify(payload) }),
-  hospitals: () => request<PaginatedResponse<Hospital>>("/api/v1/hospitals/"),
+  hospitals: () => request<PaginatedResponse<Hospital>>("/api/v1/hospitals/?active_only=true"),
   createHospital: (payload: unknown) => request<Hospital>("/api/v1/hospitals/", { method: "POST", body: JSON.stringify(payload) }),
-  specialties: () => request<PaginatedResponse<Specialty>>("/api/v1/specialties/translations?locale=pt-MZ"),
+  specialties: () => request<PaginatedResponse<Specialty>>("/api/v1/specialties/discovery?locale=pt-MZ"),
+  hospitalSpecialties: (hospitalId: string) => request<PaginatedResponse<Specialty>>(`/api/v1/hospitals/${hospitalId}/specialties?active_only=true`),
+  hospitalDoctorsBySpecialty: (hospitalId: string, specialtyId: string) => request<PaginatedResponse<Doctor>>(`/api/v1/hospitals/${hospitalId}/specialties/${specialtyId}/doctors?active_only=true`),
+  createAppointment: (payload: unknown) =>
+    request<Appointment>("/api/v1/appointments/", { method: "POST", body: JSON.stringify(payload) }),
   createHospitalAppointment: (hospitalId: string, payload: unknown) =>
     request<Appointment>(`/api/v1/hospitals/${hospitalId}/appointments`, { method: "POST", body: JSON.stringify(payload) }),
   wallet: () => request<Wallet>("/api/v1/wallet/me"),
