@@ -120,6 +120,14 @@ export const api = {
       }
     }
   },
+  patientMe: async () => {
+    try {
+      const patient = await request<Patient>("/api/v1/patients/me");
+      return { items: [patient], total: 1 };
+    } catch {
+      return { items: [], total: 0 };
+    }
+  },
   createPatient: (payload: unknown) => request<Patient>("/api/v1/patients/", { method: "POST", body: JSON.stringify(payload) }),
   doctors: () => request<PaginatedResponse<Doctor>>("/api/v1/doctors/"),
   createDoctor: (payload: unknown) => request<Doctor>("/api/v1/doctors/", { method: "POST", body: JSON.stringify(payload) }),

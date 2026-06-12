@@ -97,6 +97,10 @@ function roleHasWallet(role: Role) {
   return role === "doctor" || role === "hospital";
 }
 
+function canLoadRecords(role: Role) {
+  return role === "patient" || role === "doctor" || role === "admin";
+}
+
 function usePrivateQuery<T>(key: string[], queryFn: () => Promise<T>, enabled = true) {
   return useQuery({ queryKey: key, queryFn, enabled: Boolean(getAccessToken()) && enabled, retry: 1 });
 }
@@ -127,18 +131,19 @@ export function App() {
   const oauthProviders = useQuery({ queryKey: ["oauth-providers"], queryFn: api.oauthProviders, retry: 0 });
   const user = usePrivateQuery(["me"], api.me);
   const role = roleFromUser(user.data, selectedRole);
+  const userReady = !authenticated || Boolean(user.data);
   const hasWallet = roleHasWallet(role);
-  const appointmentsQuery = usePrivateQuery(["appointments"], api.appointments);
-  const patientsQuery = usePrivateQuery(["patients"], api.patients);
-  const doctorsQuery = usePrivateQuery(["doctors"], api.doctors);
-  const hospitalsQuery = usePrivateQuery(["hospitals"], api.hospitals);
-  const specialtiesQuery = usePrivateQuery(["specialties"], api.specialties);
-  const walletQuery = usePrivateQuery(["wallet"], api.wallet, hasWallet);
-  const transactionsQuery = usePrivateQuery(["wallet-transactions"], api.walletTransactions, hasWallet);
-  const recordsQuery = usePrivateQuery(["medical-records"], api.medicalRecords);
-  const notificationsQuery = usePrivateQuery(["notifications"], api.notifications);
-  const preferencesQuery = usePrivateQuery(["preferences"], api.preferences);
-  const adminQuery = usePrivateQuery(["admin-summary"], api.adminSummary);
+  const appointmentsQuery = usePrivateQuery(["appointments"], api.appointments, userReady);
+  const patientsQuery = usePrivateQuery(["patients", role], role === "patient" ? api.patientMe : api.patients, userReady);
+  const doctorsQuery = usePrivateQuery(["doctors"], api.doctors, userReady);
+  const hospitalsQuery = usePrivateQuery(["hospitals"], api.hospitals, userReady);
+  const specialtiesQuery = usePrivateQuery(["specialties"], api.specialties, userReady);
+  const walletQuery = usePrivateQuery(["wallet", role], api.wallet, userReady && hasWallet);
+  const transactionsQuery = usePrivateQuery(["wallet-transactions", role], api.walletTransactions, userReady && hasWallet);
+  const recordsQuery = usePrivateQuery(["medical-records", role], api.medicalRecords, userReady && canLoadRecords(role));
+  const notificationsQuery = usePrivateQuery(["notifications"], api.notifications, userReady);
+  const preferencesQuery = usePrivateQuery(["preferences"], api.preferences, userReady);
+  const adminQuery = usePrivateQuery(["admin-summary"], api.adminSummary, userReady && role === "admin");
 
   const visibleModules = modules.filter((item) => canAccess(item, role, authenticated));
   const allPrivateErrors = [appointmentsQuery, patientsQuery, doctorsQuery, hospitalsQuery, specialtiesQuery, recordsQuery, notificationsQuery, walletQuery, adminQuery].filter((query) => query.error);
