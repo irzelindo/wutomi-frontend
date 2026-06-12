@@ -58,10 +58,78 @@ export type Appointment = {
 export type Patient = {
   id: string;
   user_id?: string | null;
+  user?: CurrentUser | null;
   user_full_name?: string | null;
   full_name?: string | null;
   phone?: string | null;
   blood_type?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  allergies_summary?: string | null;
+  chronic_conditions_summary?: string | null;
+  insurance_provider?: string | null;
+  insurance_number?: string | null;
+  consent_telemedicine?: boolean;
+  consent_data_processing?: boolean;
+  allergies?: PatientAllergy[];
+  conditions?: PatientCondition[];
+  medications?: PatientMedication[];
+  insurance_details?: PatientInsurance[];
+  emergency_contacts?: PatientContact[];
+};
+
+export type PatientAllergy = {
+  id: number;
+  allergen: string;
+  severity: string;
+  reaction_description?: string | null;
+  notes?: string | null;
+  created_at: string;
+};
+
+export type PatientCondition = {
+  id: number;
+  condition_name: string;
+  icd10_code?: string | null;
+  diagnosed_date?: string | null;
+  status: string;
+  notes?: string | null;
+  created_at: string;
+};
+
+export type PatientMedication = {
+  id: number;
+  medication_name: string;
+  dosage?: string | null;
+  frequency?: string | null;
+  prescribed_by?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_active: boolean;
+  notes?: string | null;
+  created_at: string;
+};
+
+export type PatientInsurance = {
+  id: number;
+  provider_name: string;
+  policy_number: string;
+  plan_type?: string | null;
+  coverage_details?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  is_primary: boolean;
+  created_at: string;
+};
+
+export type PatientContact = {
+  id: number;
+  contact_name: string;
+  relation_type?: string | null;
+  phone: string;
+  email?: string | null;
+  is_primary: boolean;
+  created_at: string;
 };
 
 export type Doctor = {
@@ -73,12 +141,42 @@ export type Doctor = {
   specialty?: string | null;
   specialty_id?: string | null;
   specialty_description?: string | null;
+  specialty_details?: string | null;
+  subspecialty?: string | null;
   status?: string | null;
   consultation_fee?: string | number | null;
   currency?: string | null;
   telemedicine_enabled?: boolean;
   in_person_enabled?: boolean;
   years_of_experience?: number | null;
+  biography?: string | null;
+  average_rating?: string | number | null;
+  experience?: string | null;
+  availability_summary?: string | null;
+  specialties?: DoctorSpecialty[];
+  availability?: DoctorAvailability[];
+};
+
+export type DoctorSpecialty = {
+  id: number;
+  name: string;
+  specialty_id?: string | null;
+  specialty_code_system?: string | null;
+  specialty_code?: string | null;
+  specialty_code_display?: string | null;
+  is_primary: boolean;
+  created_at: string;
+};
+
+export type DoctorAvailability = {
+  id: number;
+  weekday: number;
+  weekday_name: string;
+  start_time: string;
+  end_time: string;
+  slot_duration_minutes: number;
+  is_active: boolean;
+  location?: string | null;
 };
 
 export type Hospital = {

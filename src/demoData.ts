@@ -70,6 +70,15 @@ export const demoDoctors: Doctor[] = [
     currency: "MZN",
     in_person_enabled: true,
     telemedicine_enabled: true,
+    years_of_experience: 12,
+    average_rating: "4.8",
+    experience: "Acompanhamento de hipertensão, arritmias e prevenção cardiovascular.",
+    availability_summary: "Segunda, quarta e sexta · 08:00-13:00",
+    availability: [
+      { id: 1, weekday: 1, weekday_name: "segunda-feira", start_time: "08:00:00", end_time: "13:00:00", slot_duration_minutes: 30, is_active: true, location: "Hospital Central, Sala 203" },
+      { id: 2, weekday: 3, weekday_name: "quarta-feira", start_time: "08:00:00", end_time: "13:00:00", slot_duration_minutes: 30, is_active: true, location: "Hospital Central, Sala 203" },
+      { id: 3, weekday: 5, weekday_name: "sexta-feira", start_time: "09:00:00", end_time: "12:30:00", slot_duration_minutes: 30, is_active: true, location: "Telemedicina" },
+    ],
   },
   {
     id: "DC-2026-00002-CCC",
@@ -80,6 +89,14 @@ export const demoDoctors: Doctor[] = [
     consultation_fee: "900.00",
     currency: "MZN",
     in_person_enabled: true,
+    years_of_experience: 8,
+    average_rating: "4.6",
+    experience: "Consulta pediátrica geral, vigilância infantil e urgências leves.",
+    availability_summary: "Terça e quinta · 09:00-15:00",
+    availability: [
+      { id: 4, weekday: 2, weekday_name: "terça-feira", start_time: "09:00:00", end_time: "15:00:00", slot_duration_minutes: 20, is_active: true, location: "Clinica Polana, Bloco B" },
+      { id: 5, weekday: 4, weekday_name: "quinta-feira", start_time: "09:00:00", end_time: "15:00:00", slot_duration_minutes: 20, is_active: true, location: "Clinica Polana, Bloco B" },
+    ],
   },
   {
     id: "DC-2026-00003-DDD",
@@ -90,6 +107,16 @@ export const demoDoctors: Doctor[] = [
     consultation_fee: "1200.00",
     currency: "MZN",
     in_person_enabled: true,
+    years_of_experience: 15,
+    average_rating: "4.9",
+    experience: "Saúde materna, planeamento familiar e consultas ginecológicas de rotina.",
+    availability_summary: "Segunda a quinta · 10:00-16:00",
+    availability: [
+      { id: 6, weekday: 1, weekday_name: "segunda-feira", start_time: "10:00:00", end_time: "16:00:00", slot_duration_minutes: 30, is_active: true, location: "Consulta externa" },
+      { id: 7, weekday: 2, weekday_name: "terça-feira", start_time: "10:00:00", end_time: "16:00:00", slot_duration_minutes: 30, is_active: true, location: "Consulta externa" },
+      { id: 8, weekday: 3, weekday_name: "quarta-feira", start_time: "10:00:00", end_time: "16:00:00", slot_duration_minutes: 30, is_active: true, location: "Telemedicina" },
+      { id: 9, weekday: 4, weekday_name: "quinta-feira", start_time: "10:00:00", end_time: "16:00:00", slot_duration_minutes: 30, is_active: true, location: "Consulta externa" },
+    ],
   },
 ];
 

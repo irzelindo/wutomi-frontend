@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BadgeCheck,
@@ -13,6 +13,7 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  MapPin,
   RefreshCw,
   Search,
   Settings,
@@ -41,6 +42,16 @@ import type { Appointment, CurrentUser, Doctor, Hospital as HospitalType, Medica
 type View = "overview" | "auth" | "users" | "appointments" | "booking" | "patients" | "doctors" | "hospitals" | "specialties" | "records" | "notifications" | "wallet" | "profile" | "settings" | "admin";
 type AuthMode = "login" | "register" | "forgot" | "oauth";
 type Access = "public" | "patient" | "doctor" | "hospital" | "admin" | "clinical" | "authenticated";
+type ProfilePayload = {
+  action: "save_profile" | "add_allergy" | "add_condition" | "add_medication" | "add_insurance" | "add_contact";
+  user: Record<string, string>;
+  patient?: Record<string, string | boolean>;
+  allergy?: Record<string, string>;
+  condition?: Record<string, string>;
+  medication?: Record<string, string | boolean>;
+  insurance?: Record<string, string | boolean>;
+  contact?: Record<string, string | boolean>;
+};
 
 type ModuleSpec = {
   view: View;
@@ -191,6 +202,16 @@ export function App() {
   const appointments = dataOrDemo(appointmentsQuery.data, demoAppointments, demoMode);
   const patients = dataOrDemo(patientsQuery.data, demoPatients, demoMode);
   const doctors = dataOrDemo(doctorsQuery.data, demoDoctors, demoMode);
+  const doctorDetailQueries = useQueries({
+    queries: doctors.map((doctor) => ({
+      queryKey: ["doctor-detail", doctor.id],
+      queryFn: () => api.doctor(doctor.id),
+      enabled: Boolean(authenticated && !demoMode && view === "doctors" && doctor.id),
+      retry: 1,
+    })),
+  });
+  const doctorDetails = doctorDetailQueries.map((query) => query.data).filter(Boolean) as Doctor[];
+  const doctorsWithDetails = doctors.map((doctor) => ({ ...doctor, ...doctorDetails.find((detail) => detail.id === doctor.id) }));
   const hospitals = dataOrDemo(hospitalsQuery.data, demoHospitals, demoMode);
   const specialties = dataOrDemo(specialtiesQuery.data, demoSpecialties, demoMode);
   const transactions = dataOrDemo(transactionsQuery.data, demoTransactions, demoMode);
@@ -234,29 +255,28 @@ export function App() {
 
   const forgot = useMutation({ mutationFn: api.forgotPassword, onSuccess: () => setNotice("Se o email estiver registado, enviaremos instruções para recuperar a senha."), onError: (error) => setNotice(friendlyError(error, "forgot")) });
   const updateProfile = useMutation({
-    mutationFn: async (payload: unknown) => {
-      const updatedUser = await api.updateUser(user.data?.id || "", payload);
+    mutationFn: async (payload: ProfilePayload) => {
+      const updatedUser = payload.action === "save_profile" ? await api.updateUser(user.data?.id || "", payload.user) : user.data;
       let patient: Patient | undefined;
       if (role === "patient") {
         const currentPatient = await api.patientMe();
         patient = pageItems(currentPatient)[0];
         if (!patient) {
           patient = await api.createPatient({
-            user_id: updatedUser.id,
-            full_name: updatedUser.full_name,
-            phone: updatedUser.phone,
-            gender: updatedUser.gender,
-            date_of_birth: updatedUser.date_of_birth,
-            document_type: updatedUser.document_type,
-            document_number: updatedUser.document_number,
-            address: updatedUser.address,
+            user_id: updatedUser?.id,
+            ...payload.patient,
           });
+        } else if (payload.action === "save_profile" && payload.patient) {
+          const { consent_telemedicine, consent_data_processing, ...patientProfile } = payload.patient;
+          patient = await api.updatePatient(patient.id, patientProfile);
+          patient = await api.updatePatientConsents(patient.id, { consent_telemedicine, consent_data_processing });
         }
+        if (patient) await savePatientSubresources(patient.id, payload);
       }
-      return { updatedUser, patient };
+      return { updatedUser, patient, action: payload.action };
     },
     onSuccess: (data) => {
-      setNotice(data.patient ? "Perfil de paciente atualizado. Já pode marcar consulta." : "Perfil atualizado.");
+      setNotice(data.action === "save_profile" ? (data.patient ? "Perfil de paciente atualizado. Já pode marcar consulta." : "Perfil atualizado.") : "Registo adicionado ao perfil do paciente.");
       queryClient.invalidateQueries({ queryKey: ["me"] });
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       if (data.patient) queryClient.setQueryData(["patients", "patient"], { items: [data.patient], total: 1 });
@@ -314,13 +334,13 @@ export function App() {
         {view === "appointments" && <RequireAuth authenticated={authenticated}><AppointmentsView role={role} appointments={appointments} onAction={(id, action) => appointmentAction.mutate({ id, action })} /></RequireAuth>}
         {view === "booking" && <RequireAuth authenticated={authenticated}><BookingView hospitals={hospitals} patients={patients} disabled={!authenticated} demoMode={demoMode} onSubmit={(body) => createAppointment.mutate(body)} /></RequireAuth>}
         {view === "patients" && <RequireAuth authenticated={authenticated}><PeopleView title="Pacientes" search={search} onSearch={setSearch} items={patients.filter((item) => personName(item).toLowerCase().includes(search.toLowerCase()))} render={(patient) => <PatientCard patient={patient} />} /></RequireAuth>}
-        {view === "doctors" && <RequireAuth authenticated={authenticated}><PeopleView title="Medicos" search={search} onSearch={setSearch} items={doctors.filter((item) => `${doctorName(item)} ${item.specialty || ""}`.toLowerCase().includes(search.toLowerCase()))} render={(doctor) => <DoctorCard doctor={doctor} />} /></RequireAuth>}
+        {view === "doctors" && <RequireAuth authenticated={authenticated}><PeopleView title="Medicos" search={search} onSearch={setSearch} items={doctorsWithDetails.filter((item) => `${doctorName(item)} ${item.specialty || ""}`.toLowerCase().includes(search.toLowerCase()))} render={(doctor) => <DoctorCard doctor={doctor} />} /></RequireAuth>}
         {view === "hospitals" && <RequireAuth authenticated={authenticated}><HospitalsView hospitals={hospitals} search={search} onSearch={setSearch} /></RequireAuth>}
         {view === "specialties" && <RequireAuth authenticated={authenticated}><SpecialtiesView specialties={specialties} search={search} onSearch={setSearch} /></RequireAuth>}
-        {view === "records" && <RequireAuth authenticated={authenticated}><RecordsView records={records} patients={patients} doctors={doctors} appointments={appointments} disabled={!authenticated} onCreate={(payload) => createRecord.mutate(payload)} /></RequireAuth>}
+        {view === "records" && <RequireAuth authenticated={authenticated}><RecordsView role={role} user={user.data} records={records} patients={patients} doctors={doctors} appointments={appointments} disabled={!authenticated} onCreate={(payload) => createRecord.mutate(payload)} /></RequireAuth>}
         {view === "notifications" && <RequireAuth authenticated={authenticated}><NotificationsView notifications={notifications} preferences={preferences} onPreference={(payload) => updatePreference.mutate(payload)} /></RequireAuth>}
         {view === "wallet" && <RequireAuth authenticated={authenticated}><WalletView wallet={wallet} transactions={transactions} disabled={!authenticated} onTopUp={(payload) => topUp.mutate(payload)} /></RequireAuth>}
-        {view === "profile" && <RequireAuth authenticated={authenticated}><ProfileView user={user.data} role={role} disabled={!authenticated} onSubmit={(payload) => updateProfile.mutate(payload)} /></RequireAuth>}
+        {view === "profile" && <RequireAuth authenticated={authenticated}><ProfileView user={user.data} patient={patients[0]} role={role} disabled={!authenticated} onSubmit={(payload) => updateProfile.mutate(payload)} /></RequireAuth>}
         {view === "settings" && <SettingsView demoMode={demoMode} setDemoMode={setDemoMode} preferences={preferences} onPreference={(payload) => updatePreference.mutate(payload)} />}
         {view === "admin" && <RequireRole role={role} required="admin"><AdminView summary={adminSummary} /></RequireRole>}
       </main>
@@ -331,6 +351,17 @@ export function App() {
 const emptyAdminSummary = { total_users: 0, active_users: 0, admin_users: 0, total_doctors: 0, active_doctors: 0, total_patients: 0, total_appointments: 0, pending_appointments: 0, completed_appointments: 0, total_payments: 0, completed_payments: 0, total_revenue: 0 };
 function dataOrDemo<T>(payload: { items?: T[]; results?: T[] } | T[] | undefined, demo: T[], demoMode: boolean): T[] { if (payload) return pageItems(payload); return demoMode ? demo : []; }
 function roleLabel(role: string) { return role === "doctor" ? "Medico" : role === "hospital" ? "Hospital" : role === "admin" ? "Admin" : "Paciente"; }
+function cleanPayload<T extends Record<string, string | boolean | undefined>>(payload: T) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== "" && value !== undefined)) as T;
+}
+function dateToApiDateTime(value?: string) { return value ? `${value}T00:00:00` : ""; }
+async function savePatientSubresources(patientId: string, payload: ProfilePayload) {
+  if (payload.action === "add_allergy" && payload.allergy?.allergen) await api.addPatientAllergy(patientId, cleanPayload(payload.allergy));
+  if (payload.action === "add_condition" && payload.condition?.condition_name) await api.addPatientCondition(patientId, cleanPayload({ ...payload.condition, diagnosed_date: dateToApiDateTime(payload.condition.diagnosed_date) }));
+  if (payload.action === "add_medication" && payload.medication?.medication_name) await api.addPatientMedication(patientId, cleanPayload({ ...payload.medication, start_date: dateToApiDateTime(String(payload.medication.start_date || "")), end_date: dateToApiDateTime(String(payload.medication.end_date || "")) }));
+  if (payload.action === "add_insurance" && payload.insurance?.provider_name && payload.insurance.policy_number) await api.addPatientInsurance(patientId, cleanPayload({ ...payload.insurance, valid_from: dateToApiDateTime(String(payload.insurance.valid_from || "")), valid_until: dateToApiDateTime(String(payload.insurance.valid_until || "")) }));
+  if (payload.action === "add_contact" && payload.contact?.contact_name && payload.contact.phone) await api.addPatientContact(patientId, cleanPayload(payload.contact));
+}
 
 function AuthenticatedBar({ user, role, onLogout }: { user?: CurrentUser; role: Role; onLogout: () => void }) { return <section className="session-panel compact-session"><div><span className="section-kicker">Sessao</span><h2>{user?.full_name || user?.email || "Utilizador autenticado"}</h2><p>{roleLabel(role)} · {user?.is_verified ? "email verificado" : "email por verificar"}</p></div><button onClick={onLogout} className="secondary-button"><LogOut size={17} /> Sair</button></section>; }
 function ApiErrorBanner({ errors }: { errors: Error[] }) { return <section className="notice"><Bell size={17} /><span>{friendlyError(errors[0], "modules")}</span></section>; }
@@ -344,6 +375,7 @@ function SessionPanel(props: { mode: AuthMode; setMode: (mode: AuthMode) => void
 
 function Overview({ role, authenticated, demoMode, modules, appointments, todayAppointments, pending, active, completed, patients, doctors, hospitals, revenue }: { role: Role; authenticated: boolean; demoMode: boolean; modules: ModuleSpec[]; appointments: Appointment[]; todayAppointments: Appointment[]; pending: number; active: number; completed: number; patients: number; doctors: number; hospitals: number; revenue: string | number }) {
   const showOperationalMetrics = role !== "patient";
+  const showRevenue = role === "hospital" || role === "admin";
   const nextAppointment = appointments
     .filter((item) => new Date(item.scheduled_start).getTime() >= Date.now())
     .sort((a, b) => new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime())[0];
@@ -353,7 +385,7 @@ function Overview({ role, authenticated, demoMode, modules, appointments, todayA
       <Metric label="Consultas hoje" value={todayAppointments.length} hint={authenticated ? "Actualizadas" : "Entre para ver"} icon={CalendarDays} />
       <Metric label="Pendentes" value={pending} hint="Aguardam confirmacao" icon={BadgeCheck} />
       {showOperationalMetrics && <Metric label="Cadastros" value={patients + doctors + hospitals} hint={`${patients} pacientes · ${doctors} medicos · ${hospitals} hospitais`} icon={HeartPulse} />}
-      {showOperationalMetrics && <Metric label="Receita" value={formatMoney(revenue)} hint="Pagamentos concluidos" icon={CreditCard} />}
+      {showRevenue && <Metric label="Receita" value={formatMoney(revenue)} hint="Pagamentos concluidos" icon={CreditCard} />}
     </section>
     {!authenticated && !demoMode && <Panel title="Dados reais protegidos"><p className="empty-state">Entre com uma conta real ou ative o modo demonstração em Configurações para explorar os módulos.</p></Panel>}
     <section className="content-grid">
@@ -477,7 +509,7 @@ function BookingView({ hospitals, patients, disabled, demoMode, onSubmit }: { ho
 
           <label>Médico
             <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} disabled={!specialtyId || hospitalDoctors.isLoading || !doctors.length}>
-              {doctors.map((item) => <option key={item.id} value={item.id}>{doctorName(item)} · {formatMoney(item.consultation_fee, item.currency || "MZN")}</option>)}
+              {doctors.map((item) => <option key={item.id} value={item.id}>{doctorName(item)}</option>)}
             </select>
           </label>
           {selectedDoctor && <p className="helper-text">{selectedDoctor.specialty || selectedSpecialty?.name || "Especialidade seleccionada"}</p>}
@@ -518,8 +550,153 @@ function FlowStep({ number, label, active }: { number: number; label: string; ac
   return <div className={`flow-step ${active ? "active" : ""}`}><span>{number}</span><strong>{label}</strong></div>;
 }
 
-function ProfileView({ user, role, disabled, onSubmit }: { user?: CurrentUser; role: Role; disabled: boolean; onSubmit: (payload: unknown) => void }) { return <Panel title="Dados pessoais"><form className="form-grid" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSubmit(Object.fromEntries(data.entries())); }}><label>Nome<input name="full_name" defaultValue={user?.full_name || ""} /></label><label>Email<input name="email" type="email" defaultValue={user?.email || ""} /></label><label>Telefone<input name="phone" defaultValue={user?.phone || ""} /></label><label>Genero<input name="gender" defaultValue={user?.gender || ""} /></label><label>Documento<input name="document_type" defaultValue={user?.document_type || "BI"} /></label><label>Numero<input name="document_number" defaultValue={user?.document_number || ""} /></label><label className="wide">Endereco<input name="address" defaultValue={user?.address || ""} /></label><label>Locale<input name="locale" defaultValue={user?.locale || "pt-MZ"} /></label><label>Timezone<input name="timezone" defaultValue={user?.timezone || "Africa/Maputo"} /></label><label>Tipo<input disabled value={roleLabel(role)} /></label><button disabled={disabled}>{disabled ? "Entre para editar" : "Guardar perfil"}</button></form></Panel>; }
-function RecordsView({ records, patients, doctors, appointments, disabled, onCreate }: { records: MedicalRecord[]; patients: Patient[]; doctors: Doctor[]; appointments: Appointment[]; disabled: boolean; onCreate: (payload: unknown) => void }) { return <section className="content-grid"><Panel title="Prontuarios"><Timeline items={records} render={(item) => <><strong>{item.patient_full_name || item.patient_id}</strong><span>{item.chief_complaint || "Sem queixa"} · {item.assessment || "Sem avaliacao"}</span><span>{formatDate(item.created_at)}</span></>} /></Panel><Panel title="Novo registo clinico"><form className="stacked-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onCreate(Object.fromEntries(data.entries())); }}><SelectField name="patient_id" label="Paciente" items={patients.map((item) => ({ value: item.id, label: personName(item) }))} /><SelectField name="doctor_id" label="Medico" items={doctors.map((item) => ({ value: item.id, label: doctorName(item) }))} /><SelectField name="appointment_id" label="Consulta" items={appointments.map((item) => ({ value: item.id, label: `${formatDate(item.scheduled_start)} · ${item.patient_full_name || item.patient_id}` }))} /><textarea name="chief_complaint" rows={2} placeholder="Queixa principal" /><textarea name="assessment" rows={2} placeholder="Avaliacao" /><textarea name="plan" rows={2} placeholder="Plano" /><button disabled={disabled}>{disabled ? "Entre para criar" : "Criar prontuario"}</button></form></Panel></section>; }
+function ProfileView({ user, patient, role, disabled, onSubmit }: { user?: CurrentUser; patient?: Patient; role: Role; disabled: boolean; onSubmit: (payload: ProfilePayload) => void }) {
+  const patientUser = patient?.user;
+  const isPatient = role === "patient";
+
+  return <Panel title="Dados pessoais">
+    <form className="form-grid profile-form" onSubmit={(event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const value = (name: string) => String(data.get(name) || "").trim();
+      const submitter = event.nativeEvent.submitter as HTMLButtonElement | null;
+      const action = (submitter?.value || "save_profile") as ProfilePayload["action"];
+      onSubmit({
+        action,
+        user: cleanPayload({
+          full_name: value("full_name"),
+          email: value("email"),
+          phone: value("phone"),
+          gender: value("gender"),
+          document_type: value("document_type"),
+          document_number: value("document_number"),
+          address: value("address"),
+          locale: value("locale"),
+          timezone: value("timezone"),
+        }),
+        patient: isPatient ? cleanPayload({
+          blood_type: value("blood_type"),
+          allergies_summary: value("allergies_summary"),
+          chronic_conditions_summary: value("chronic_conditions_summary"),
+          insurance_provider: value("insurance_provider"),
+          insurance_number: value("insurance_number"),
+          emergency_contact_name: value("emergency_contact_name"),
+          emergency_contact_phone: value("emergency_contact_phone"),
+          consent_telemedicine: data.get("consent_telemedicine") === "on",
+          consent_data_processing: data.get("consent_data_processing") === "on",
+        }) : undefined,
+        allergy: cleanPayload({ allergen: value("allergen"), severity: value("allergy_severity") || "unknown", reaction_description: value("reaction_description"), notes: value("allergy_notes") }),
+        condition: cleanPayload({ condition_name: value("condition_name"), icd10_code: value("icd10_code"), diagnosed_date: value("diagnosed_date"), status: value("condition_status") || "active", notes: value("condition_notes") }),
+        medication: cleanPayload({ medication_name: value("medication_name"), dosage: value("dosage"), frequency: value("frequency"), prescribed_by: value("prescribed_by"), start_date: value("medication_start_date"), end_date: value("medication_end_date"), is_active: data.get("medication_is_active") === "on", notes: value("medication_notes") }),
+        insurance: cleanPayload({ provider_name: value("provider_name"), policy_number: value("policy_number"), plan_type: value("plan_type"), coverage_details: value("coverage_details"), valid_from: value("valid_from"), valid_until: value("valid_until"), is_primary: data.get("insurance_is_primary") === "on" }),
+        contact: cleanPayload({ contact_name: value("contact_name"), relation_type: value("relation_type"), phone: value("contact_phone"), email: value("contact_email"), is_primary: data.get("contact_is_primary") === "on" }),
+      });
+    }}>
+      <div className="form-section wide"><h3>Identificação</h3></div>
+      <label>Nome<input name="full_name" defaultValue={user?.full_name || patientUser?.full_name || ""} /></label>
+      <label>Email<input name="email" type="email" defaultValue={user?.email || patientUser?.email || ""} /></label>
+      <label>Telefone<input name="phone" defaultValue={user?.phone || patientUser?.phone || patient?.phone || ""} /></label>
+      <label>Genero<input name="gender" defaultValue={user?.gender || patientUser?.gender || ""} /></label>
+      <label>Tipo de documento<input name="document_type" defaultValue={user?.document_type || patientUser?.document_type || "BI"} /></label>
+      <label>Numero do documento<input name="document_number" defaultValue={user?.document_number || patientUser?.document_number || ""} /></label>
+      <label className="wide">Endereco<input name="address" defaultValue={user?.address || patientUser?.address || ""} /></label>
+      <label>Locale<input name="locale" defaultValue={user?.locale || patientUser?.locale || "pt-MZ"} /></label>
+      <label>Timezone<input name="timezone" defaultValue={user?.timezone || patientUser?.timezone || "Africa/Maputo"} /></label>
+      <label>Tipo<input disabled value={roleLabel(role)} /></label>
+
+      {isPatient && <>
+        <div className="form-section wide"><h3>Documentos</h3><p>Selecione os ficheiros para preparar o cadastro. O módulo de pacientes da API ainda não expõe upload de ficheiros.</p></div>
+        <label>Documento de identificação<input name="identity_document_file" type="file" accept=".pdf,image/*" /></label>
+        <label>Ficha de seguro ou plano de saúde<input name="insurance_document_file" type="file" accept=".pdf,image/*" /></label>
+
+        <div className="form-section wide"><h3>Dados clínicos</h3></div>
+        <label>Tipo sanguíneo<select name="blood_type" defaultValue={patient?.blood_type || "desconhecido"}><option value="desconhecido">desconhecido</option><option value="A">A</option><option value="A+">A+</option><option value="A-">A-</option><option value="B">B</option><option value="B+">B+</option><option value="B-">B-</option><option value="AB">AB</option><option value="AB+">AB+</option><option value="AB-">AB-</option><option value="O">O</option><option value="O+">O+</option><option value="O-">O-</option></select></label>
+        <label className="wide">Alergias conhecidas<textarea name="allergies_summary" rows={3} defaultValue={patient?.allergies_summary || patient?.allergies?.map((item) => item.allergen).join(", ") || ""} placeholder="Ex.: Penicilina, amendoim, poeira" /></label>
+        <label className="wide">Condições crónicas<textarea name="chronic_conditions_summary" rows={3} defaultValue={patient?.chronic_conditions_summary || patient?.conditions?.map((item) => item.condition_name).join(", ") || ""} placeholder="Ex.: Asma, hipertensão, diabetes" /></label>
+
+        <div className="form-section wide"><h3>Seguro ou plano de saúde</h3></div>
+        <label>Seguradora / plano<input name="insurance_provider" defaultValue={patient?.insurance_provider || ""} placeholder="Ex.: SAMS" /></label>
+        <label>Número da apólice / cartão<input name="insurance_number" defaultValue={patient?.insurance_number || ""} /></label>
+        <label>Adicionar provedor<input name="provider_name" placeholder="Nome da seguradora" /></label>
+        <label>Número da apólice<input name="policy_number" /></label>
+        <label>Tipo de plano<input name="plan_type" placeholder="Familiar, individual, empresarial" /></label>
+        <label>Valido desde<input name="valid_from" type="date" /></label>
+        <label>Valido até<input name="valid_until" type="date" /></label>
+        <label className="wide">Cobertura<textarea name="coverage_details" rows={2} placeholder="Cobertura ambulatorial, internamento, medicamentos..." /></label>
+        <label className="toggle-row wide"><span>Seguro principal</span><input name="insurance_is_primary" type="checkbox" /></label>
+        <div className="form-action-row wide"><button className="profile-add-button" name="profile_action" value="add_insurance" disabled={disabled}>Adicionar seguro / plano</button></div>
+
+        <div className="form-section wide"><h3>Adicionar alergia</h3></div>
+        <label>Alergeno<input name="allergen" placeholder="Ex.: Penicilina" /></label>
+        <label>Gravidade<select name="allergy_severity" defaultValue="unknown"><option value="unknown">Desconhecida</option><option value="mild">Leve</option><option value="moderate">Moderada</option><option value="severe">Grave</option></select></label>
+        <label className="wide">Reação<textarea name="reaction_description" rows={2} placeholder="Descreva a reação observada" /></label>
+        <label className="wide">Notas<textarea name="allergy_notes" rows={2} /></label>
+        <div className="form-action-row wide"><button className="profile-add-button" name="profile_action" value="add_allergy" disabled={disabled}>Adicionar alergia</button></div>
+
+        <div className="form-section wide"><h3>Adicionar condição</h3></div>
+        <label>Condição<input name="condition_name" placeholder="Ex.: Diabetes Tipo 2" /></label>
+        <label>Código ICD-10<input name="icd10_code" placeholder="Ex.: E11" /></label>
+        <label>Data do diagnóstico<input name="diagnosed_date" type="date" /></label>
+        <label>Estado<select name="condition_status" defaultValue="active"><option value="active">Ativa</option><option value="managed">Controlada</option><option value="resolved">Resolvida</option></select></label>
+        <label className="wide">Notas da condição<textarea name="condition_notes" rows={2} /></label>
+        <div className="form-action-row wide"><button className="profile-add-button" name="profile_action" value="add_condition" disabled={disabled}>Adicionar condição</button></div>
+
+        <div className="form-section wide"><h3>Adicionar medicação</h3></div>
+        <label>Medicação<input name="medication_name" placeholder="Ex.: Metformina" /></label>
+        <label>Dosagem<input name="dosage" placeholder="Ex.: 500mg" /></label>
+        <label>Frequência<input name="frequency" placeholder="Ex.: 2x ao dia" /></label>
+        <label>Prescrito por<input name="prescribed_by" /></label>
+        <label>Início<input name="medication_start_date" type="date" /></label>
+        <label>Fim<input name="medication_end_date" type="date" /></label>
+        <label className="toggle-row wide"><span>Medicação ativa</span><input name="medication_is_active" type="checkbox" defaultChecked /></label>
+        <label className="wide">Notas da medicação<textarea name="medication_notes" rows={2} /></label>
+        <div className="form-action-row wide"><button className="profile-add-button" name="profile_action" value="add_medication" disabled={disabled}>Adicionar medicação</button></div>
+
+        <div className="form-section wide"><h3>Contacto de emergência</h3></div>
+        <label>Nome<input name="emergency_contact_name" defaultValue={patient?.emergency_contact_name || ""} /></label>
+        <label>Telefone<input name="emergency_contact_phone" defaultValue={patient?.emergency_contact_phone || ""} /></label>
+        <label>Adicionar contacto<input name="contact_name" /></label>
+        <label>Relação<input name="relation_type" placeholder="Ex.: Esposa, irmão" /></label>
+        <label>Telefone do contacto<input name="contact_phone" /></label>
+        <label>Email do contacto<input name="contact_email" type="email" /></label>
+        <label className="toggle-row wide"><span>Contacto principal</span><input name="contact_is_primary" type="checkbox" /></label>
+        <div className="form-action-row wide"><button className="profile-add-button" name="profile_action" value="add_contact" disabled={disabled}>Adicionar contacto</button></div>
+
+        <div className="form-section wide"><h3>Consentimentos</h3></div>
+        <label className="toggle-row"><span>Telemedicina</span><input name="consent_telemedicine" type="checkbox" defaultChecked={Boolean(patient?.consent_telemedicine)} /></label>
+        <label className="toggle-row"><span>Tratamento de dados</span><input name="consent_data_processing" type="checkbox" defaultChecked={Boolean(patient?.consent_data_processing)} /></label>
+      </>}
+
+      <button className="wide" name="profile_action" value="save_profile" disabled={disabled}>{disabled ? "Entre para editar" : "Guardar perfil"}</button>
+    </form>
+  </Panel>;
+}
+function RecordsView({ role, user, records, patients, doctors, appointments, disabled, onCreate }: { role: Role; user?: CurrentUser; records: MedicalRecord[]; patients: Patient[]; doctors: Doctor[]; appointments: Appointment[]; disabled: boolean; onCreate: (payload: unknown) => void }) {
+  const canCreate = role === "doctor";
+  const currentDoctor = doctors.find((doctor) => doctor.user_id === user?.id || doctor.user_email === user?.email);
+
+  return <section className={`content-grid records-grid ${canCreate ? "" : "records-grid-single"}`}>
+    <Panel title="Prontuarios">
+      <Timeline items={records} render={(item) => <><strong>{item.patient_full_name || item.patient_id}</strong><span>{item.chief_complaint || "Sem queixa"} · {item.assessment || "Sem avaliacao"}</span><span>{formatDate(item.created_at)}</span></>} />
+    </Panel>
+    {canCreate && <Panel title="Novo registo clinico">
+      <form className="stacked-form" onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        if (currentDoctor) data.set("doctor_id", currentDoctor.id);
+        onCreate(Object.fromEntries(data.entries()));
+      }}>
+        <SelectField name="patient_id" label="Paciente" items={patients.map((item) => ({ value: item.id, label: personName(item) }))} />
+        {currentDoctor ? <input type="hidden" name="doctor_id" value={currentDoctor.id} /> : <SelectField name="doctor_id" label="Medico" items={doctors.map((item) => ({ value: item.id, label: doctorName(item) }))} />}
+        <SelectField name="appointment_id" label="Consulta" items={appointments.map((item) => ({ value: item.id, label: `${formatDate(item.scheduled_start)} · ${item.patient_full_name || item.patient_id}` }))} />
+        <textarea name="chief_complaint" rows={2} placeholder="Queixa principal" />
+        <textarea name="assessment" rows={2} placeholder="Avaliacao" />
+        <textarea name="plan" rows={2} placeholder="Plano" />
+        <button disabled={disabled}>{disabled ? "Entre para criar" : "Criar prontuario"}</button>
+      </form>
+    </Panel>}
+  </section>;
+}
 function NotificationsView({ notifications, preferences, onPreference }: { notifications: { id: string; channel: string; subject?: string | null; body: string; status: string; created_at: string }[]; preferences: { channel: string; enabled: boolean }[]; onPreference: (payload: { channel: string; enabled: boolean }) => void }) { return <section className="content-grid"><Panel title="Notificacoes"><Timeline items={notifications} render={(item) => <><strong>{item.subject || item.channel}</strong><span>{item.body}</span><StatusPill value={item.status} /></>} /></Panel><Panel title="Preferencias"><PreferenceList preferences={preferences} onPreference={onPreference} /></Panel></section>; }
 function WalletView({ wallet, transactions, disabled, onTopUp }: { wallet: { balance: string | number; currency: string }; transactions: { id: number; amount: string | number; direction: string; description?: string | null; transaction_type?: string; created_at: string }[]; disabled: boolean; onTopUp: (payload: unknown) => void }) { return <section className="content-grid"><Panel title="Carteira"><div className="wallet-card"><span>Saldo disponivel</span><strong>{formatMoney(wallet.balance, wallet.currency)}</strong></div><form className="stacked-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onTopUp({ amount: data.get("amount"), provider: data.get("provider"), phone_number: data.get("phone") }); }}><input required name="amount" type="number" min="1" step="0.01" placeholder="Valor" /><select name="provider"><option value="mpesa">M-Pesa</option><option value="mkesh">mKesh</option><option value="emola">e-Mola</option></select><input required name="phone" placeholder="841234567" /><button disabled={disabled}>{disabled ? "Entre para carregar" : "Carregar carteira"}</button></form></Panel><Panel title="Movimentos"><Timeline items={transactions} render={(item) => <><strong>{item.direction === "credit" ? "+" : "-"} {formatMoney(item.amount)}</strong><span>{item.description || item.transaction_type || "Movimento"} · {formatDate(item.created_at)}</span></>} /></Panel></section>; }
 function HospitalsView({ hospitals, search, onSearch }: { hospitals: HospitalType[]; search: string; onSearch: (value: string) => void }) {
@@ -543,6 +720,69 @@ function QueueItem({ value, label }: { value: number; label: string }) { return 
 function StatusPill({ value }: { value?: string | null }) { return <span className={`status-pill status-${value || "unknown"}`}>{statusLabels[value || ""] || value || "-"}</span>; }
 function SelectField({ name, label, items }: { name: string; label: string; items: { value: string; label: string }[] }) { return <label>{label}<select required name={name}>{items.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>; }
 function PatientCard({ patient }: { patient: Patient }) { return <article className="person-card"><div><h3>{personName(patient)}</h3><p>{patient.phone || "Telefone nao informado"}</p></div><div className="badge-row"><span className="badge">Sangue: {patient.blood_type || "desconhecido"}</span><span className="badge">{patient.id}</span></div></article>; }
-function DoctorCard({ doctor }: { doctor: Doctor }) { return <article className="person-card"><div><h3>{doctorName(doctor)}</h3><p>{doctor.specialty || "Especialidade nao informada"}</p></div><div className="badge-row"><StatusPill value={doctor.status || "active"} /><span className="badge">{formatMoney(doctor.consultation_fee, doctor.currency || "MZN")}</span></div></article>; }
+function DoctorCard({ doctor }: { doctor: Doctor }) {
+  return <article className="person-card doctor-card">
+    <div>
+      <h3>{doctorName(doctor)}</h3>
+      <p>{doctorSpecialtiesText(doctor)}</p>
+    </div>
+    <div className="doctor-meta">
+      <span><strong>{doctorExperienceText(doctor)}</strong></span>
+      <span><strong>Avaliação:</strong> {doctorRatingText(doctor)}</span>
+      <span>{doctor.biography || doctor.experience || doctor.specialty_description || "Atendimento clinico com dados profissionais em atualização."}</span>
+      <DoctorAgenda doctor={doctor} />
+    </div>
+    <div className="badge-row">
+      <StatusPill value={doctor.status || "active"} />
+      {doctor.in_person_enabled && <span className="badge">Presencial</span>}
+      {doctor.telemedicine_enabled && <span className="badge">Telemedicina</span>}
+    </div>
+  </article>;
+}
 function personName(patient: Patient) { return patient.user_full_name || patient.full_name || patient.id; }
 function doctorName(doctor: Doctor) { return doctor.user_full_name || doctor.user_email || doctor.id; }
+function doctorExperienceText(doctor: Doctor) { return doctor.years_of_experience ? `${doctor.years_of_experience} anos de experiência` : "Anos de experiência por confirmar"; }
+function doctorRatingText(doctor: Doctor) { return doctor.average_rating ? `${Number(doctor.average_rating).toLocaleString("pt-MZ", { maximumFractionDigits: 1 })}/5` : "Sem avaliação"; }
+function doctorSpecialtiesText(doctor: Doctor) {
+  const specialties = [doctor.specialty, doctor.subspecialty, ...(doctor.specialties || []).map((item) => item.name)].filter(Boolean);
+  return [...new Set(specialties)].join(" · ") || "Especialidade nao informada";
+}
+function formatTime(value?: string) { return value ? value.slice(0, 5) : ""; }
+function DoctorAgenda({ doctor }: { doctor: Doctor }) {
+  const slots = (doctor.availability || []).filter((slot) => slot.is_active).sort((a, b) => a.weekday - b.weekday);
+  if (slots.length) {
+    const visible = slots.slice(0, 4);
+    return <div className="doctor-agenda" aria-label={`Agenda de ${doctorName(doctor)}`}>
+      <div className="doctor-agenda-heading">
+        <CalendarDays size={15} />
+        <strong>Agenda</strong>
+      </div>
+      <div className="doctor-agenda-grid">
+        {visible.map((slot) => <div className="doctor-agenda-slot" key={slot.id}>
+          <span className="agenda-day">{weekdayShort(slot.weekday_name)}</span>
+          <span className="agenda-time">{formatTime(slot.start_time)}-{formatTime(slot.end_time)}</span>
+          {slot.location && <span className="agenda-location"><MapPin size={12} />{slot.location}</span>}
+        </div>)}
+        {slots.length > visible.length && <span className="agenda-more">+{slots.length - visible.length} horário{slots.length - visible.length > 1 ? "s" : ""}</span>}
+      </div>
+    </div>;
+  }
+  return <div className="doctor-agenda doctor-agenda-summary">
+    <div className="doctor-agenda-heading">
+      <CalendarDays size={15} />
+      <strong>Agenda</strong>
+    </div>
+    <span>{doctor.availability_summary || (doctor.in_person_enabled || doctor.telemedicine_enabled ? "Disponível mediante marcação" : "Agenda por confirmar")}</span>
+  </div>;
+}
+function weekdayShort(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized.startsWith("segunda")) return "Seg";
+  if (normalized.startsWith("terça") || normalized.startsWith("terca")) return "Ter";
+  if (normalized.startsWith("quarta")) return "Qua";
+  if (normalized.startsWith("quinta")) return "Qui";
+  if (normalized.startsWith("sexta")) return "Sex";
+  if (normalized.startsWith("sábado") || normalized.startsWith("sabado")) return "Sab";
+  if (normalized.startsWith("domingo")) return "Dom";
+  return value.slice(0, 3);
+}

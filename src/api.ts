@@ -129,7 +129,23 @@ export const api = {
     }
   },
   createPatient: (payload: unknown) => request<Patient>("/api/v1/patients/", { method: "POST", body: JSON.stringify(payload) }),
+  updatePatient: (patientId: string, payload: unknown) =>
+    request<Patient>(`/api/v1/patients/${patientId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  updatePatientConsents: (patientId: string, payload: unknown) =>
+    request<Patient>(`/api/v1/patients/${patientId}/consents`, { method: "PATCH", body: JSON.stringify(payload) }),
+  addPatientAllergy: (patientId: string, payload: unknown) =>
+    request(`/api/v1/patients/${patientId}/allergies`, { method: "POST", body: JSON.stringify(payload) }),
+  addPatientCondition: (patientId: string, payload: unknown) =>
+    request(`/api/v1/patients/${patientId}/conditions`, { method: "POST", body: JSON.stringify(payload) }),
+  addPatientMedication: (patientId: string, payload: unknown) =>
+    request(`/api/v1/patients/${patientId}/medications`, { method: "POST", body: JSON.stringify(payload) }),
+  addPatientInsurance: (patientId: string, payload: unknown) =>
+    request(`/api/v1/patients/${patientId}/insurance`, { method: "POST", body: JSON.stringify(payload) }),
+  addPatientContact: (patientId: string, payload: unknown) =>
+    request(`/api/v1/patients/${patientId}/contacts`, { method: "POST", body: JSON.stringify(payload) }),
   doctors: () => request<PaginatedResponse<Doctor>>("/api/v1/doctors/"),
+  doctor: (id: string) => request<Doctor>(`/api/v1/doctors/${id}`),
+  doctorMe: () => request<Doctor>("/api/v1/doctors/me"),
   createDoctor: (payload: unknown) => request<Doctor>("/api/v1/doctors/", { method: "POST", body: JSON.stringify(payload) }),
   hospitals: () => request<PaginatedResponse<Hospital>>("/api/v1/hospitals/?active_only=true"),
   createHospital: (payload: unknown) => request<Hospital>("/api/v1/hospitals/", { method: "POST", body: JSON.stringify(payload) }),
