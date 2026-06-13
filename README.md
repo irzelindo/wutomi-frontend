@@ -38,6 +38,12 @@ Pode alterar a base URL em `.env`:
 cp .env.example .env
 ```
 
+O cadastro público fica ativo por padrão apenas para pacientes. Médicos e hospitais devem contactar a administração da app para criação de conta. Para ocultar a aba de cadastro na UI sem alterar código, defina:
+
+```bash
+VITE_ENABLE_PUBLIC_REGISTRATION=false
+```
+
 ## Funcionalidades cobertas
 
 - Login com email/senha
@@ -49,9 +55,9 @@ cp .env.example .env
 - Dashboard operacional
 - Agendamento hospitalar presencial
 - Consultas e transicoes principais de estado
-- Pacientes, medicos, hospitais e especialidades
-- Prontuario clinico
-- Notificacoes e preferencias por canal
+- Pacientes, médicos, hospitais e especialidades
+- Prontuário clínico
+- Notificações e preferencias por canal
 - Carteira e carregamento por M-Pesa, mKesh ou e-Mola
 - Area admin com indicadores
 - Modo demonstracao com dados ficticios quando nao ha sessao

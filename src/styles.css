@@ -217,6 +217,46 @@ textarea {
   resize: vertical;
 }
 
+input[type="file"] {
+  min-height: 42px;
+  padding: 5px 10px 5px 5px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input[type="file"]::file-selector-button {
+  min-height: 30px;
+  margin-right: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface-muted);
+  color: var(--brand-strong);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+input[type="file"]::-webkit-file-upload-button {
+  min-height: 30px;
+  margin-right: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface-muted);
+  color: var(--brand-strong);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+input[type="file"]:hover::file-selector-button,
+input[type="file"]:hover::-webkit-file-upload-button {
+  border-color: var(--brand);
+  background: #eaf6f2;
+}
+
 button,
 .secondary-button {
   display: inline-flex;
@@ -592,6 +632,98 @@ th {
   margin: 4px 0 6px;
 }
 
+.field-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.date-picker-panel,
+.time-picker-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.date-choice-grid,
+.time-choice-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.date-choice-grid {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.time-choice-grid {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px 8px 2px 2px;
+}
+
+.date-choice,
+.time-choice {
+  min-height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.date-choice {
+  display: grid;
+  gap: 2px;
+}
+
+.date-choice span,
+.time-choice small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.date-choice strong {
+  font-weight: 800;
+}
+
+.time-choice {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-height: 78px;
+  overflow: hidden;
+}
+
+.time-choice strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.time-choice small {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.date-choice:hover,
+.time-choice:hover,
+.date-choice.active,
+.time-choice.active {
+  border-color: var(--brand);
+  background: #eaf6f2;
+  color: var(--brand-strong);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -618,6 +750,57 @@ th {
 .profile-form textarea,
 .profile-form input[type="file"] {
   width: 100%;
+}
+
+.profile-avatar-card {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: #fbfdfc;
+}
+
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-muted);
+  color: var(--brand-strong);
+  font-size: 30px;
+  font-weight: 900;
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-avatar-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.profile-avatar-fields > strong,
+.profile-avatar-fields > span {
+  grid-column: 1 / -1;
+}
+
+.profile-avatar-fields > strong {
+  font-size: 18px;
+}
+
+.profile-avatar-fields > span {
+  margin-top: -8px;
+  color: var(--muted);
 }
 
 .form-section {
@@ -902,10 +1085,16 @@ th {
   .login-form,
   .form-grid,
   .queue-grid,
-  .admin-grid {
+  .admin-grid,
+  .profile-avatar-card,
+  .profile-avatar-fields {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .profile-avatar {
+    justify-self: center;
   }
 
   .icon-button {
@@ -995,6 +1184,13 @@ th {
 
 .compact-session {
   align-items: center;
+}
+
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .module-grid {

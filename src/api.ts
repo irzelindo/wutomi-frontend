@@ -20,9 +20,20 @@ export const API_TARGET_URL = "https://api.wutomi.com";
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ||
   (import.meta.env.DEV ? "/remote" : API_TARGET_URL);
+export const SESSION_EXPIRED_EVENT = "wutomi:session-expired";
 
 let accessToken = localStorage.getItem("wutomi.accessToken") || "";
 let refreshToken = localStorage.getItem("wutomi.refreshToken") || "";
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, detail: string) {
+    super(detail || `HTTP ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 export function setSession(session?: TokenResponse | null) {
   accessToken = session?.access_token || "";
@@ -56,6 +67,19 @@ export function clearOauthHash() {
   }
 }
 
+export function readEmailVerificationTokenFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("verification_token") || params.get("token");
+}
+
+export function clearEmailVerificationTokenFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  params.delete("verification_token");
+  params.delete("token");
+  const search = params.toString();
+  window.history.replaceState({}, document.title, `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
+}
+
 export function getAccessToken() {
   return accessToken;
 }
@@ -73,7 +97,12 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `HTTP ${response.status}`);
+    const error = new ApiError(response.status, detail);
+    const lowerDetail = detail.toLowerCase();
+    if (accessToken && (response.status === 401 || (response.status === 403 && (lowerDetail.includes("token") || lowerDetail.includes("session") || lowerDetail.includes("authenticated"))))) {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    }
+    throw error;
   }
 
   if (response.status === 204) return undefined as T;
@@ -97,6 +126,8 @@ export const api = {
   changePassword: (payload: { current_password: string; new_password: string }) =>
     request<CurrentUser>("/api/v1/auth/change-password", { method: "POST", body: JSON.stringify(payload) }),
   sendVerification: () => request<{ message: string; verification_token?: string | null }>("/api/v1/auth/send-verification", { method: "POST" }),
+  verifyEmail: (token: string) =>
+    request<CurrentUser>("/api/v1/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) }),
   oauthProviders: () => request<OAuthProvider[]>("/api/v1/auth/oauth/providers"),
   oauthAuthorize: (provider: string) => request<{ provider: string; authorization_url: string }>(`/api/v1/auth/oauth/${provider}/authorize`),
   me: () => request<CurrentUser>("/api/v1/auth/me"),
@@ -111,16 +142,29 @@ export const api = {
   patients: async () => {
     try {
       return await request<PaginatedResponse<Patient>>("/api/v1/patients/");
-    } catch {
+    } catch (error) {
       try {
         const patient = await request<Patient>("/api/v1/patients/me");
         return { items: [patient], total: 1 };
-      } catch {
-        return { items: [], total: 0 };
+      } catch (fallbackError) {
+        if (error instanceof ApiError && error.status === 404) return { items: [], total: 0 };
+        if (fallbackError instanceof ApiError && fallbackError.status === 404) return { items: [], total: 0 };
+        throw fallbackError;
       }
     }
   },
   patientMe: async () => {
+    try {
+      const patient = await request<Patient>("/api/v1/patients/me");
+      return { items: [patient], total: 1 };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return { items: [], total: 0 };
+      }
+      throw error;
+    }
+  },
+  patientMeOptional: async () => {
     try {
       const patient = await request<Patient>("/api/v1/patients/me");
       return { items: [patient], total: 1 };

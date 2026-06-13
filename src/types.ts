@@ -62,6 +62,8 @@ export type Patient = {
   user_full_name?: string | null;
   full_name?: string | null;
   phone?: string | null;
+  date_of_birth?: string | null;
+  photo_url?: string | null;
   blood_type?: string | null;
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;

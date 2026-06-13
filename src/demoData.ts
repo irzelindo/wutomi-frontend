@@ -151,7 +151,7 @@ export const demoTransactions: WalletTransaction[] = [
     amount: "100.00",
     direction: "debit",
     transaction_type: "booking_fee",
-    description: "Taxa de confirmacao de consulta",
+    description: "Taxa de confirmação de consulta",
     created_at: new Date(now - 30 * 60 * 1000).toISOString(),
   },
 ];
